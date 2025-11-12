@@ -1,0 +1,16 @@
+{
+  "name": "daybreak",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --parallel run dev",
+    "dev:frontend": "pnpm --filter @daybreak/frontend dev",
+    "dev:backend": "pnpm --filter @daybreak/backend dev",
+    "build": "pnpm --filter @daybreak/backend build && pnpm --filter @daybreak/frontend build",
+    "build:frontend": "pnpm --filter @daybreak/frontend build",
+    "build:backend": "pnpm --filter @daybreak/backend build"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
