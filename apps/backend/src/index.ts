@@ -1,18 +1,32 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serve } from '@hono/node-server'
+import { clerkMiddleware, getAuth } from '@hono/clerk-auth'
 
 // Create the Hono app
 const app = new Hono()
   .use('/*', cors())
+  .use('*', clerkMiddleware())
 
   // Health check
   .get('/health', (c) => {
     return c.json({ status: 'ok', timestamp: new Date().toISOString() })
   })
 
-  // GET /api/events - Get all events
+  // GET /api/events - Get all events (requires authentication)
   .get('/api/events', (c) => {
+    const auth = getAuth(c)
+
+    if (!auth?.userId) {
+      return c.json(
+        {
+          error: 'Unauthorized',
+          message: 'You must be logged in to view events.'
+        },
+        401
+      )
+    }
+
     const events = [
       {
         id: 1,
