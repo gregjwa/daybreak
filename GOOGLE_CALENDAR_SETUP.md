@@ -22,11 +22,12 @@ Visit [Google Cloud Console](https://console.cloud.google.com/)
 3. Name it "Daybreak" (or your app name)
 4. Click "Create"
 
-### 3. Enable Google Calendar API
+### 3. Enable Required APIs
 
 1. In the left sidebar, go to **APIs & Services** → **Library**
-2. Search for "Google Calendar API"
-3. Click on it and press **Enable**
+2. Search for and enable the following APIs:
+   - **Google Calendar API** - Click **Enable**
+   - **Gmail API** - Search, click, then **Enable**
 
 ### 4. Configure OAuth Consent Screen
 
@@ -42,8 +43,10 @@ Visit [Google Cloud Console](https://console.cloud.google.com/)
 
 6. **Scopes** page:
    - Click **Add or Remove Scopes**
-   - Search for "Google Calendar API"
-   - Select `https://www.googleapis.com/auth/calendar.readonly`
+   - Search for "Google Calendar API" and "Gmail API"
+   - Select the following scopes:
+     - `https://www.googleapis.com/auth/calendar.readonly` (for calendar access)
+     - `https://www.googleapis.com/auth/gmail.readonly` (for email analysis)
    - Click **Update**
    - Click **Save and Continue**
 
@@ -99,13 +102,16 @@ Visit [Clerk Dashboard](https://dashboard.clerk.com/)
 In the Google OAuth settings in Clerk:
 
 1. Find the **Scopes** section
-2. Add the following scope:
+2. Add the following scopes:
    ```
    https://www.googleapis.com/auth/calendar.readonly
+   https://www.googleapis.com/auth/gmail.readonly
    ```
 3. Click **Save**
 
-> **Important**: The `calendar.readonly` scope allows reading calendar events. Without this, the app cannot access Google Calendar.
+> **Important**:
+> - `calendar.readonly` - Allows reading calendar events
+> - `gmail.readonly` - Allows reading emails for booking inquiry analysis
 
 ## Step 3: Configure User Connection
 
