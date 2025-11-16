@@ -6,9 +6,13 @@ import {
   UserButton,
 } from "@clerk/clerk-react";
 import { useEvents } from "@/hooks/useEvents";
+import { useGmailWatch } from "@/hooks/useGmailWatch";
 
 function App() {
   const { data: events, isLoading, error } = useEvents();
+
+  // Automatically set up Gmail watch when user signs in
+  useGmailWatch();
 
   return (
     <div>
