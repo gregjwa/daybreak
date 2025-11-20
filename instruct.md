@@ -1,0 +1,2 @@
+PROMPTS
+I want to make a Postgres database on railway using Prisma. I want to be able to have users (which are currently on Clerk) and I want these users to send invite links to register to other uses. Please install Prisma and implement the prism schema and tell me how to deploy
