@@ -1,0 +1,8 @@
+{
+  "buildCommand": "cd apps/frontend && pnpm build",
+  "outputDirectory": "apps/frontend/dist",
+  "installCommand": "pnpm install --filter=@daybreak/frontend",
+  "framework": null,
+  "devCommand": "cd apps/frontend && pnpm dev"
+}
+
