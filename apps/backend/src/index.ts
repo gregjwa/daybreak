@@ -350,6 +350,160 @@ const app = new Hono()
   })
 
   // ============================================================================
+  // PROFILE ENDPOINTS
+  // ============================================================================
+
+  // POST /api/profile/setup-business - Convert existing User to Business
+  .post("/api/profile/setup-business", async (c) => {
+    const auth = getAuth(c);
+
+    if (!auth?.userId) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    try {
+      const body = await c.req.json();
+      const { businessName } = body;
+
+      if (!businessName) {
+        return c.json({ error: "Business name is required" }, 400);
+      }
+
+      const clerkClient = c.get("clerk");
+      const clerkUser = await clerkClient.users.getUser(auth.userId);
+      const userEmail = clerkUser.emailAddresses.find(
+        (email) => email.id === clerkUser.primaryEmailAddressId
+      )?.emailAddress;
+
+      if (!userEmail) {
+        return c.json({ error: "No email found for user" }, 400);
+      }
+
+      // Check if user already exists
+      let user = await prisma.user.findUnique({
+        where: { clerkId: auth.userId },
+        include: { business: true, person: true },
+      });
+
+      // If user doesn't exist, create them
+      if (!user) {
+        user = await prisma.user.create({
+          data: {
+            clerkId: auth.userId,
+            email: userEmail,
+            accountType: "BUSINESS",
+          },
+          include: { business: true, person: true },
+        });
+      }
+
+      // Check if already a Business
+      if (user.business) {
+        return c.json(
+          {
+            error: "Already a Business",
+            business: user.business,
+          },
+          400
+        );
+      }
+
+      // Check if already a Person
+      if (user.person) {
+        return c.json(
+          {
+            error:
+              "This account is a Person account. Cannot convert to Business.",
+          },
+          400
+        );
+      }
+
+      // Update user to Business and create Business record
+      const result = await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: user!.id },
+          data: { accountType: "BUSINESS" },
+        });
+
+        const business = await tx.business.create({
+          data: {
+            userId: user!.id,
+            name: businessName,
+          },
+        });
+
+        return business;
+      });
+
+      return c.json({
+        success: true,
+        business: result,
+        message: "Business profile created successfully",
+      });
+    } catch (error) {
+      console.error("Error setting up business:", error);
+      return c.json(
+        {
+          error: "Failed to setup business",
+          message: error instanceof Error ? error.message : "Unknown error",
+        },
+        500
+      );
+    }
+  })
+
+  // GET /api/profile/me - Get current user profile
+  .get("/api/profile/me", async (c) => {
+    const auth = getAuth(c);
+
+    if (!auth?.userId) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    try {
+      const user = await prisma.user.findUnique({
+        where: { clerkId: auth.userId },
+        include: {
+          business: true,
+          person: {
+            include: {
+              businesses: {
+                include: {
+                  business: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!user) {
+        return c.json({ error: "User not found" }, 404);
+      }
+
+      return c.json({
+        user: {
+          id: user.id,
+          email: user.email,
+          accountType: user.accountType,
+          business: user.business,
+          person: user.person,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+      return c.json(
+        {
+          error: "Failed to fetch profile",
+          message: error instanceof Error ? error.message : "Unknown error",
+        },
+        500
+      );
+    }
+  })
+
+  // ============================================================================
   // GMAIL WEBHOOK
   // ============================================================================
 
