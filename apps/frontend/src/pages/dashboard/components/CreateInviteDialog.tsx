@@ -69,7 +69,8 @@ const CreateInviteDialog = ({ children }: CreateInviteDialogProps) => {
     }, 300);
   };
 
-  const copyToClipboard = () => {
+  const copyToClipboard = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
     if (generatedInvite) {
       navigator.clipboard.writeText(generatedInvite.inviteUrl);
     }

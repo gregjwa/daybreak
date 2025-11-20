@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Navigate } from "react-router-dom";
-import { useAuth, SignedIn, SignedOut, SignInButton } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignInButton } from "@clerk/clerk-react";
 import { useValidateInvite, useAcceptInvite } from "@/api/useInvites";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
@@ -10,7 +10,6 @@ import { Badge } from "@/ui/badge";
 
 const InviteAcceptPage = () => {
   const { code } = useParams<{ code: string }>();
-  const { isSignedIn } = useAuth();
   const [name, setName] = useState("");
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
 
@@ -38,7 +37,8 @@ const InviteAcceptPage = () => {
     });
   };
 
-  const toggleRole = (role: string) => {
+  const toggleRole = (e: React.MouseEvent<HTMLDivElement>, role: string) => {
+    e.preventDefault();
     setSelectedRoles((prev) =>
       prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
     );
@@ -150,7 +150,7 @@ const InviteAcceptPage = () => {
                       key={role}
                       variant={selectedRoles.includes(role) ? "default" : "outline"}
                       className="cursor-pointer"
-                      onClick={() => toggleRole(role)}
+                      onClick={(e) => toggleRole(e, role)}
                     >
                       {role}
                     </Badge>
