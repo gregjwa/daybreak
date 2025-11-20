@@ -232,7 +232,7 @@ const app = new Hono()
         }
 
         // Create User and Person in a transaction
-        const result = await prisma.$transaction(async (tx) => {
+        const result = await prisma.$transaction(async (tx: any) => {
           const user = await tx.user.create({
             data: {
               clerkId: auth.userId,
@@ -287,7 +287,7 @@ const app = new Hono()
         }
 
         // Create User and Business in a transaction
-        const result = await prisma.$transaction(async (tx) => {
+        const result = await prisma.$transaction(async (tx: any) => {
           const user = await tx.user.create({
             data: {
               clerkId: auth.userId,
@@ -420,7 +420,7 @@ const app = new Hono()
       }
 
       // Update user to Business and create Business record
-      const result = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx: any) => {
         await tx.user.update({
           where: { id: user!.id },
           data: { accountType: "BUSINESS" },
