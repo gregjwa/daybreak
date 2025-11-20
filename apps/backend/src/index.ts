@@ -4,54 +4,17 @@ import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { clerkMiddleware, getAuth } from "@hono/clerk-auth";
 import { google } from "googleapis";
-
-// Helper function to extract email body from Gmail message
-function extractEmailBody(payload: any): string {
-  let body = "";
-
-  if (payload.parts) {
-    const textPart = payload.parts.find(
-      (part: any) => part.mimeType === "text/plain"
-    );
-    if (textPart?.body?.data) {
-      body = Buffer.from(textPart.body.data, "base64").toString("utf-8");
-    }
-  } else if (payload.body?.data) {
-    body = Buffer.from(payload.body.data, "base64").toString("utf-8");
-  }
-
-  return body;
-}
-
-// Helper function to fetch Gmail history
-async function fetchGmailHistory(
-  gmail: any,
-  startHistoryId: string
-): Promise<any[]> {
-  try {
-    const response = await gmail.users.history.list({
-      userId: "me",
-      startHistoryId,
-      historyTypes: ["messageAdded"],
-    });
-
-    const history = response.data.history || [];
-    const newMessages = [];
-
-    for (const record of history) {
-      if (record.messagesAdded) {
-        for (const addedMessage of record.messagesAdded) {
-          newMessages.push(addedMessage.message);
-        }
-      }
-    }
-
-    return newMessages;
-  } catch (error) {
-    console.error("Error fetching Gmail history:", error);
-    return [];
-  }
-}
+import { prisma } from "./lib/prisma.js";
+import {
+  analyzeEmailForBooking,
+  extractEmailBody,
+  fetchGmailHistory,
+} from "./lib/email-analysis.js";
+import {
+  generateInviteCode,
+  isInviteExpired,
+  createExpiryDate,
+} from "./lib/invite.js";
 
 // Create the Hono app
 const app = new Hono()
@@ -62,6 +25,333 @@ const app = new Hono()
   .get("/health", (c) => {
     return c.json({ status: "ok", timestamp: new Date().toISOString() });
   })
+
+  // ============================================================================
+  // INVITE ENDPOINTS
+  // ============================================================================
+
+  // POST /api/invites/create - Create an invite (Business users only)
+  .post("/api/invites/create", async (c) => {
+    const auth = getAuth(c);
+
+    if (!auth?.userId) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    try {
+      const body = await c.req.json();
+      const { inviteType, email, expiresInDays } = body;
+
+      // Validate invite type
+      if (!["PERSON", "BUSINESS"].includes(inviteType)) {
+        return c.json(
+          { error: "Invalid invite type. Must be PERSON or BUSINESS" },
+          400
+        );
+      }
+
+      // Check if user exists and is a Business
+      const user = await prisma.user.findUnique({
+        where: { clerkId: auth.userId },
+        include: { business: true },
+      });
+
+      if (!user) {
+        return c.json(
+          { error: "User not found. Please complete your profile first." },
+          404
+        );
+      }
+
+      if (user.accountType !== "BUSINESS") {
+        return c.json(
+          { error: "Only Business accounts can send invites" },
+          403
+        );
+      }
+
+      // Generate invite code
+      const code = generateInviteCode();
+      const expiresAt = createExpiryDate(expiresInDays || 7);
+
+      const invite = await prisma.invite.create({
+        data: {
+          code,
+          senderUserId: user.id,
+          inviteType,
+          email: email || null,
+          expiresAt,
+        },
+      });
+
+      return c.json({
+        success: true,
+        invite: {
+          code: invite.code,
+          inviteType: invite.inviteType,
+          email: invite.email,
+          expiresAt: invite.expiresAt,
+          inviteUrl: `${process.env.FRONTEND_URL}/invite/${invite.code}`,
+        },
+      });
+    } catch (error) {
+      console.error("Error creating invite:", error);
+      return c.json(
+        {
+          error: "Failed to create invite",
+          message: error instanceof Error ? error.message : "Unknown error",
+        },
+        500
+      );
+    }
+  })
+
+  // GET /api/invites/validate/:code - Validate an invite code
+  .get("/api/invites/validate/:code", async (c) => {
+    try {
+      const code = c.req.param("code");
+
+      const invite = await prisma.invite.findUnique({
+        where: { code },
+        include: {
+          sender: {
+            include: {
+              business: true,
+            },
+          },
+        },
+      });
+
+      if (!invite) {
+        return c.json({ valid: false, error: "Invite not found" }, 404);
+      }
+
+      if (invite.usedAt) {
+        return c.json(
+          { valid: false, error: "Invite has already been used" },
+          400
+        );
+      }
+
+      if (isInviteExpired(invite.expiresAt)) {
+        return c.json({ valid: false, error: "Invite has expired" }, 400);
+      }
+
+      return c.json({
+        valid: true,
+        invite: {
+          inviteType: invite.inviteType,
+          email: invite.email,
+          expiresAt: invite.expiresAt,
+          senderBusiness: invite.sender.business?.name,
+        },
+      });
+    } catch (error) {
+      console.error("Error validating invite:", error);
+      return c.json(
+        {
+          error: "Failed to validate invite",
+          message: error instanceof Error ? error.message : "Unknown error",
+        },
+        500
+      );
+    }
+  })
+
+  // POST /api/invites/accept - Accept an invite and create account
+  .post("/api/invites/accept", async (c) => {
+    const auth = getAuth(c);
+
+    if (!auth?.userId) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    try {
+      const body = await c.req.json();
+      const { inviteCode, name, roles } = body;
+
+      const clerkClient = c.get("clerk");
+      const clerkUser = await clerkClient.users.getUser(auth.userId);
+      const userEmail = clerkUser.emailAddresses.find(
+        (email) => email.id === clerkUser.primaryEmailAddressId
+      )?.emailAddress;
+
+      if (!userEmail) {
+        return c.json({ error: "No email found for user" }, 400);
+      }
+
+      // Validate invite
+      const invite = await prisma.invite.findUnique({
+        where: { code: inviteCode },
+        include: {
+          sender: {
+            include: {
+              business: true,
+            },
+          },
+        },
+      });
+
+      if (!invite) {
+        return c.json({ error: "Invite not found" }, 404);
+      }
+
+      if (invite.usedAt) {
+        return c.json({ error: "Invite has already been used" }, 400);
+      }
+
+      if (isInviteExpired(invite.expiresAt)) {
+        return c.json({ error: "Invite has expired" }, 400);
+      }
+
+      // If invite is email-specific, verify it matches
+      if (invite.email && invite.email !== userEmail) {
+        return c.json(
+          { error: "This invite was sent to a different email address" },
+          403
+        );
+      }
+
+      // Create user based on invite type
+      if (invite.inviteType === "PERSON") {
+        // Validate roles for Person accounts
+        if (!roles || !Array.isArray(roles) || roles.length === 0) {
+          return c.json(
+            { error: "Please select at least one role (ENGINEER, ASSISTANT)" },
+            400
+          );
+        }
+
+        const validRoles = ["ENGINEER", "ASSISTANT"];
+        const invalidRoles = roles.filter((r) => !validRoles.includes(r));
+        if (invalidRoles.length > 0) {
+          return c.json(
+            { error: `Invalid roles: ${invalidRoles.join(", ")}` },
+            400
+          );
+        }
+
+        // Create User and Person in a transaction
+        const result = await prisma.$transaction(async (tx) => {
+          const user = await tx.user.create({
+            data: {
+              clerkId: auth.userId,
+              email: userEmail,
+              accountType: "PERSON",
+              person: {
+                create: {
+                  name,
+                  roles,
+                },
+              },
+            },
+            include: {
+              person: true,
+            },
+          });
+
+          // Link Person to inviting Business
+          if (invite.sender.business) {
+            await tx.personBusinessLink.create({
+              data: {
+                personId: user.person!.id,
+                businessId: invite.sender.business.id,
+              },
+            });
+          }
+
+          // Mark invite as used
+          await tx.invite.update({
+            where: { id: invite.id },
+            data: {
+              usedAt: new Date(),
+              usedByEmail: userEmail,
+            },
+          });
+
+          return user;
+        });
+
+        return c.json({
+          success: true,
+          user: {
+            accountType: result.accountType,
+            person: result.person,
+          },
+          message: "Person account created successfully",
+        });
+      } else if (invite.inviteType === "BUSINESS") {
+        // Validate name for Business accounts
+        if (!name) {
+          return c.json({ error: "Business name is required" }, 400);
+        }
+
+        // Create User and Business in a transaction
+        const result = await prisma.$transaction(async (tx) => {
+          const user = await tx.user.create({
+            data: {
+              clerkId: auth.userId,
+              email: userEmail,
+              accountType: "BUSINESS",
+              business: {
+                create: {
+                  name,
+                },
+              },
+            },
+            include: {
+              business: true,
+            },
+          });
+
+          // Create partnership with inviting Business
+          if (invite.sender.business) {
+            await tx.businessPartnership.create({
+              data: {
+                mainBusinessId: invite.sender.business.id,
+                partnerBusinessId: user.business!.id,
+              },
+            });
+          }
+
+          // Mark invite as used
+          await tx.invite.update({
+            where: { id: invite.id },
+            data: {
+              usedAt: new Date(),
+              usedByEmail: userEmail,
+            },
+          });
+
+          return user;
+        });
+
+        return c.json({
+          success: true,
+          user: {
+            accountType: result.accountType,
+            business: result.business,
+          },
+          message: "Business account created and partnership established",
+        });
+      }
+
+      return c.json({ error: "Invalid invite type" }, 400);
+    } catch (error) {
+      console.error("Error accepting invite:", error);
+      return c.json(
+        {
+          error: "Failed to accept invite",
+          message: error instanceof Error ? error.message : "Unknown error",
+        },
+        500
+      );
+    }
+  })
+
+  // ============================================================================
+  // GMAIL WEBHOOK
+  // ============================================================================
 
   // POST /api/webhooks/gmail - Receive Gmail push notifications
   .post("/api/webhooks/gmail", async (c) => {
@@ -85,58 +375,125 @@ const app = new Hono()
           `\n🔔 New email notification for ${emailAddress}, historyId: ${historyId}`
         );
 
-        // TODO: Implement database lookup and email fetching
-        // For now, this is a placeholder showing what needs to happen:
+        // Look up GmailWatch in database
+        const gmailWatch = await prisma.gmailWatch.findUnique({
+          where: { gmailAddress: emailAddress },
+          include: {
+            user: {
+              include: {
+                business: true,
+              },
+            },
+          },
+        });
 
-        // Step 1: Look up user in database
-        // const userRecord = await db.getUserByGmailAddress(emailAddress)
-        // if (!userRecord) {
-        //   console.log('No user found for email:', emailAddress)
-        //   return c.json({ success: true })
-        // }
+        if (!gmailWatch) {
+          console.log(
+            `⚠️  No watch found for ${emailAddress}. Skipping processing.`
+          );
+          return c.json({ success: true });
+        }
 
-        // Step 2: Get user's OAuth token from Clerk
-        // const clerkClient = c.get('clerk')
-        // const tokenResponse = await clerkClient.users.getUserOauthAccessToken(
-        //   userRecord.clerkUserId,
-        //   'oauth_google'
-        // )
-        // const accessToken = tokenResponse.data[0].token
+        if (!gmailWatch.user.business) {
+          console.log(
+            `⚠️  User ${emailAddress} is not a Business account. Skipping processing.`
+          );
+          return c.json({ success: true });
+        }
 
-        // Step 3: Set up Gmail client
-        // const oauth2Client = new google.auth.OAuth2()
-        // oauth2Client.setCredentials({ access_token: accessToken })
-        // const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
+        // Get user's OAuth token from Clerk
+        const clerkClient = c.get("clerk");
+        const tokenResponse = await clerkClient.users.getUserOauthAccessToken(
+          gmailWatch.user.clerkId,
+          "oauth_google"
+        );
 
-        // Step 4: Fetch new messages
-        // const newMessages = await fetchGmailHistory(gmail, historyId)
-        // console.log(`📨 Found ${newMessages.length} new messages`)
+        if (!tokenResponse.data || tokenResponse.data.length === 0) {
+          console.log(`⚠️  No OAuth token found for ${emailAddress}`);
+          return c.json({ success: true });
+        }
 
-        // Step 5: Log each email's content
-        // for (const msg of newMessages) {
-        //   const emailData = await gmail.users.messages.get({
-        //     userId: 'me',
-        //     id: msg.id,
-        //     format: 'full',
-        //   })
-        //
-        //   const headers = emailData.data.payload?.headers || []
-        //   const subject = headers.find((h) => h.name === 'Subject')?.value || ''
-        //   const from = headers.find((h) => h.name === 'From')?.value || ''
-        //   const date = headers.find((h) => h.name === 'Date')?.value || ''
-        //   const body = extractEmailBody(emailData.data.payload)
-        //
-        //   console.log('\n📧 New Email via Webhook:', {
-        //     from,
-        //     subject,
-        //     date,
-        //     body: body.substring(0, 500)
-        //   })
-        // }
+        const accessToken = tokenResponse.data[0].token;
+
+        // Set up Gmail client
+        const oauth2Client = new google.auth.OAuth2();
+        oauth2Client.setCredentials({ access_token: accessToken });
+        const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+
+        // Fetch new messages using history API
+        const newMessages = await fetchGmailHistory(
+          gmail,
+          gmailWatch.historyId
+        );
 
         console.log(
-          "\n⚠️  Database required: Cannot fetch emails without user credentials mapping"
+          `📨 Found ${newMessages.length} new messages for ${emailAddress}`
         );
+
+        // Process each new message
+        for (const msg of newMessages) {
+          try {
+            const emailData = await gmail.users.messages.get({
+              userId: "me",
+              id: msg.id!,
+              format: "full",
+            });
+
+            const headers = emailData.data.payload?.headers || [];
+            const subject =
+              headers.find((h) => h.name === "Subject")?.value || "";
+            const from = headers.find((h) => h.name === "From")?.value || "";
+            const date = headers.find((h) => h.name === "Date")?.value || "";
+            const body = extractEmailBody(emailData.data.payload);
+            const snippet = emailData.data.snippet || "";
+
+            // Analyze email for booking inquiry
+            const analysis = analyzeEmailForBooking(subject, body);
+
+            console.log("\n📧 New Email:", {
+              from,
+              subject,
+              date,
+              isBookingInquiry: analysis.isBookingInquiry,
+              confidence: analysis.confidence,
+            });
+
+            // Save to database if it's a potential booking inquiry
+            if (analysis.isBookingInquiry) {
+              await prisma.enquiry.create({
+                data: {
+                  businessId: gmailWatch.user.business.id,
+                  emailId: msg.id!,
+                  fromEmail: from,
+                  subject,
+                  body,
+                  snippet,
+                  confidence: analysis.confidence.toUpperCase() as
+                    | "HIGH"
+                    | "MEDIUM"
+                    | "LOW",
+                  matchedKeywords: analysis.matchedKeywords,
+                  receivedAt: date ? new Date(date) : new Date(),
+                },
+              });
+
+              console.log(
+                `✅ Saved booking inquiry from ${from} with ${analysis.confidence} confidence`
+              );
+            }
+          } catch (error) {
+            console.error(`Error processing message ${msg.id}:`, error);
+            // Continue processing other messages
+          }
+        }
+
+        // Update historyId in database
+        await prisma.gmailWatch.update({
+          where: { id: gmailWatch.id },
+          data: { historyId },
+        });
+
+        console.log(`✅ Updated historyId to ${historyId} for ${emailAddress}`);
       }
 
       // Always return 200 to acknowledge receipt
@@ -144,9 +501,13 @@ const app = new Hono()
     } catch (error) {
       console.error("Gmail webhook error:", error);
       // Still return 200 to avoid retries
-      return c.json({ success: false });
+      return c.json({ success: false, error: "Internal error" });
     }
   })
+
+  // ============================================================================
+  // GMAIL WATCH ENDPOINTS
+  // ============================================================================
 
   // POST /api/emails/watch - Set up Gmail push notifications
   .post("/api/emails/watch", async (c) => {
@@ -159,10 +520,10 @@ const app = new Hono()
     try {
       const clerkClient = c.get("clerk");
 
-      // Get user info to retrieve email address
-      const user = await clerkClient.users.getUser(auth.userId);
-      const userEmail = user.emailAddresses.find(
-        (email) => email.id === user.primaryEmailAddressId
+      // Get user info
+      const clerkUser = await clerkClient.users.getUser(auth.userId);
+      const userEmail = clerkUser.emailAddresses.find(
+        (email) => email.id === clerkUser.primaryEmailAddressId
       )?.emailAddress;
 
       const tokenResponse = await clerkClient.users.getUserOauthAccessToken(
@@ -181,10 +542,9 @@ const app = new Hono()
 
       // Get the Gmail profile to get the actual Gmail address
       const profile = await gmail.users.getProfile({ userId: "me" });
-      const gmailAddress = profile.data.emailAddress;
+      const gmailAddress = profile.data.emailAddress!;
 
       // Set up watch on user's mailbox
-      // You need to create a Pub/Sub topic first (see setup guide)
       const topicName =
         process.env.GMAIL_PUBSUB_TOPIC ||
         "projects/YOUR_PROJECT/topics/gmail-notifications";
@@ -193,17 +553,35 @@ const app = new Hono()
         userId: "me",
         requestBody: {
           topicName,
-          labelIds: ["INBOX"], // Watch inbox only
+          labelIds: ["INBOX"],
         },
       });
 
-      // TODO: Store this mapping in database for webhook processing
-      // await db.upsert('gmail_watches', {
-      //   gmailAddress,
-      //   clerkUserId: auth.userId,
-      //   historyId: watchResponse.data.historyId,
-      //   expiresAt: watchResponse.data.expiration
-      // })
+      // Find or create user in database
+      const user = await prisma.user.upsert({
+        where: { clerkId: auth.userId },
+        update: {},
+        create: {
+          clerkId: auth.userId,
+          email: userEmail!,
+          accountType: "BUSINESS", // Default to BUSINESS for Gmail watch setup
+        },
+      });
+
+      // Upsert GmailWatch
+      await prisma.gmailWatch.upsert({
+        where: { gmailAddress },
+        update: {
+          historyId: watchResponse.data.historyId!,
+          expiresAt: BigInt(watchResponse.data.expiration!),
+        },
+        create: {
+          userId: user.id,
+          gmailAddress,
+          historyId: watchResponse.data.historyId!,
+          expiresAt: BigInt(watchResponse.data.expiration!),
+        },
+      });
 
       console.log("Gmail watch setup:", {
         clerkUserId: auth.userId,
@@ -259,6 +637,17 @@ const app = new Hono()
         userId: "me",
       });
 
+      // Optionally delete GmailWatch from database
+      const user = await prisma.user.findUnique({
+        where: { clerkId: auth.userId },
+      });
+
+      if (user) {
+        await prisma.gmailWatch.deleteMany({
+          where: { userId: user.id },
+        });
+      }
+
       return c.json({
         success: true,
         message: "Gmail watch stopped successfully.",
@@ -312,6 +701,8 @@ const app = new Hono()
         `\n📨 Processing ${newMessages.length} new messages since historyId: ${historyId}`
       );
 
+      const bookingInquiries = [];
+
       for (const msg of newMessages) {
         const emailData = await gmail.users.messages.get({
           userId: "me",
@@ -323,19 +714,36 @@ const app = new Hono()
         const subject = headers.find((h) => h.name === "Subject")?.value || "";
         const from = headers.find((h) => h.name === "From")?.value || "";
         const date = headers.find((h) => h.name === "Date")?.value || "";
-
         const body = extractEmailBody(emailData.data.payload);
+        const snippet = emailData.data.snippet || "";
+
+        const analysis = analyzeEmailForBooking(subject, body);
 
         console.log("\n📧 New Email:", {
           from,
           subject,
           date,
-          bodyPreview: body.substring(0, 200) + "...",
+          isBookingInquiry: analysis.isBookingInquiry,
+          confidence: analysis.confidence,
         });
+
+        if (analysis.isBookingInquiry) {
+          bookingInquiries.push({
+            id: msg.id,
+            from,
+            subject,
+            date,
+            snippet,
+            body: body.substring(0, 500),
+            analysis,
+          });
+        }
       }
 
       return c.json({
         newMessagesCount: newMessages.length,
+        bookingInquiriesFound: bookingInquiries.length,
+        inquiries: bookingInquiries,
       });
     } catch (error) {
       console.error("Error processing new emails:", error);
@@ -348,6 +756,10 @@ const app = new Hono()
       );
     }
   })
+
+  // ============================================================================
+  // EMAIL ANALYSIS ENDPOINT
+  // ============================================================================
 
   // GET /api/emails/analyze - Analyze Gmail inbox for booking inquiries
   .get("/api/emails/analyze", async (c) => {
@@ -403,6 +815,8 @@ const app = new Hono()
 
       const messages = response.data.messages || [];
 
+      const bookingInquiries = [];
+
       // Fetch and analyze each email
       for (const message of messages.slice(0, 10)) {
         const emailData = await gmail.users.messages.get({
@@ -415,22 +829,37 @@ const app = new Hono()
         const subject = headers.find((h) => h.name === "Subject")?.value || "";
         const from = headers.find((h) => h.name === "From")?.value || "";
         const date = headers.find((h) => h.name === "Date")?.value || "";
-
-        // Extract email body using helper function
         const body = extractEmailBody(emailData.data.payload);
+        const snippet = emailData.data.snippet || "";
+
+        const analysis = analyzeEmailForBooking(subject, body);
 
         console.log("\n📧 Email:", {
           from,
           subject,
           date,
-          bodyPreview: body.substring(0, 200) + "...",
+          isBookingInquiry: analysis.isBookingInquiry,
+          confidence: analysis.confidence,
         });
 
-        // Analyze for booking inquiry using helper function
+        if (analysis.isBookingInquiry) {
+          bookingInquiries.push({
+            id: message.id,
+            from,
+            subject,
+            date,
+            snippet,
+            body: body.substring(0, 500),
+            analysis,
+          });
+        }
       }
 
       return c.json({
         total: messages.length,
+        analyzed: Math.min(messages.length, 10),
+        bookingInquiriesFound: bookingInquiries.length,
+        inquiries: bookingInquiries,
       });
     } catch (error) {
       console.error("Error analyzing emails:", error);
@@ -443,6 +872,10 @@ const app = new Hono()
       );
     }
   })
+
+  // ============================================================================
+  // CALENDAR ENDPOINT
+  // ============================================================================
 
   // GET /api/events - Get Google Calendar events from past month
   .get("/api/events", async (c) => {

@@ -1,0 +1,181 @@
+// Prisma schema for Daybreak scheduling system
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USER MODELS
+// ============================================================================
+
+model User {
+  id          String      @id @default(cuid())
+  clerkId     String      @unique
+  email       String      @unique
+  accountType AccountType
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  business     Business?
+  person       Person?
+  gmailWatch   GmailWatch?
+  sentInvites  Invite[]    @relation("InviteSender")
+
+  @@index([clerkId])
+  @@index([email])
+}
+
+enum AccountType {
+  BUSINESS
+  PERSON
+}
+
+// ============================================================================
+// BUSINESS MODELS
+// ============================================================================
+
+model Business {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  people            PersonBusinessLink[]  @relation("BusinessPeople")
+  partnerBusinesses BusinessPartnership[] @relation("MainBusiness")
+  partneredWith     BusinessPartnership[] @relation("PartnerBusiness")
+  enquiries         Enquiry[]
+}
+
+model Person {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  roles     Role[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  businesses PersonBusinessLink[] @relation("PersonBusinesses")
+}
+
+enum Role {
+  ENGINEER
+  ASSISTANT
+}
+
+// Many-to-many relationship: Person can work with multiple Businesses
+model PersonBusinessLink {
+  id         String   @id @default(cuid())
+  personId   String
+  person     Person   @relation("PersonBusinesses", fields: [personId], references: [id], onDelete: Cascade)
+  businessId String
+  business   Business @relation("BusinessPeople", fields: [businessId], references: [id], onDelete: Cascade)
+  linkedAt   DateTime @default(now())
+
+  @@unique([personId, businessId])
+  @@index([personId])
+  @@index([businessId])
+}
+
+// Business-to-Business partnerships (e.g., partner studios in a network)
+model BusinessPartnership {
+  id                String   @id @default(cuid())
+  mainBusinessId    String
+  mainBusiness      Business @relation("MainBusiness", fields: [mainBusinessId], references: [id], onDelete: Cascade)
+  partnerBusinessId String
+  partnerBusiness   Business @relation("PartnerBusiness", fields: [partnerBusinessId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
+
+  @@unique([mainBusinessId, partnerBusinessId])
+  @@index([mainBusinessId])
+  @@index([partnerBusinessId])
+}
+
+// ============================================================================
+// INVITE SYSTEM
+// ============================================================================
+
+model Invite {
+  id           String     @id @default(cuid())
+  code         String     @unique
+  senderUserId String
+  sender       User       @relation("InviteSender", fields: [senderUserId], references: [id], onDelete: Cascade)
+  inviteType   InviteType
+  email        String? // Optional: pre-assign invite to specific email
+  expiresAt    DateTime
+  usedAt       DateTime?
+  usedByEmail  String?
+  createdAt    DateTime   @default(now())
+
+  @@index([code])
+  @@index([email])
+  @@index([expiresAt])
+}
+
+enum InviteType {
+  PERSON
+  BUSINESS
+}
+
+// ============================================================================
+// GMAIL INTEGRATION
+// ============================================================================
+
+model GmailWatch {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gmailAddress String   @unique
+  historyId    String
+  expiresAt    BigInt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([gmailAddress])
+}
+
+model Enquiry {
+  id              String          @id @default(cuid())
+  businessId      String
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  emailId         String          @unique // Gmail message ID
+  fromEmail       String
+  subject         String?
+  body            String?
+  snippet         String?
+  confidence      ConfidenceLevel
+  matchedKeywords String[]
+  receivedAt      DateTime
+  processedAt     DateTime        @default(now())
+  status          EnquiryStatus   @default(NEW)
+
+  @@index([businessId])
+  @@index([status])
+  @@index([receivedAt])
+}
+
+enum ConfidenceLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum EnquiryStatus {
+  NEW
+  REVIEWED
+  CONTACTED
+  BOOKED
+  DECLINED
+}
+
+
