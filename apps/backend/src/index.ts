@@ -58,7 +58,7 @@ async function fetchGmailHistory(
   }
 }
 
-// Create the Hono app
+// Create the Hono app and chain all routes for proper type inference
 const app = new Hono()
   .use("/*", cors())
   .use("*", clerkMiddleware())
@@ -66,18 +66,15 @@ const app = new Hono()
   // Health check
   .get("/health", (c) => {
     return c.json({ status: "ok", timestamp: new Date().toISOString() });
-  });
+  })
 
-// Mount sub-routers
-// Note: The order matters.
-app.route("/api/organizations", organizationsRouter); // /api/organizations, /api/organizations/:id
-app.route("/api/organizations", rolesRouter);         // /api/organizations/:orgId/roles
-app.route("/api/organizations", invitesRouter);       // /api/organizations/:orgId/invites
-app.route("/api/invites", invitesRouter);             // /api/invites/:token/accept, /api/invites/public/:token
+  // Mount sub-routers
+  .route("/api/organizations", organizationsRouter) // /api/organizations, /api/organizations/:id
+  .route("/api/organizations", rolesRouter) // /api/organizations/:orgId/roles
+  .route("/api/organizations", invitesRouter) // /api/organizations/:orgId/invites
+  .route("/api/invites", invitesRouter) // /api/invites/:token/accept, /api/invites/public/:token
 
-// Existing routes (kept inline for now, could be refactored later)
-app
-  // POST /api/webhooks/gmail - Receive Gmail push notifications
+  // Gmail Webhooks
   .post("/api/webhooks/gmail", async (c) => {
     try {
       const body = await c.req.json();
@@ -89,34 +86,21 @@ app
           "utf-8"
         );
         const notification = JSON.parse(decodedData);
-
-        console.log("📨 Gmail notification:", notification);
-
-        // notification contains: { emailAddress, historyId }
         const { emailAddress, historyId } = notification;
 
         console.log(
           `\n🔔 New email notification for ${emailAddress}, historyId: ${historyId}`
         );
-
-        // TODO: Implement database lookup and email fetching
-        // For now, this is a placeholder showing what needs to happen:
-
-        console.log(
-          "\n⚠️  Database required: Cannot fetch emails without user credentials mapping"
-        );
       }
 
-      // Always return 200 to acknowledge receipt
       return c.json({ success: true });
     } catch (error) {
       console.error("Gmail webhook error:", error);
-      // Still return 200 to avoid retries
       return c.json({ success: false });
     }
   })
 
-  // POST /api/emails/watch - Set up Gmail push notifications
+  // Gmail Watch Setup
   .post("/api/emails/watch", async (c) => {
     const auth = getAuth(c);
 
@@ -126,13 +110,6 @@ app
 
     try {
       const clerkClient = c.get("clerk");
-
-      // Get user info to retrieve email address
-      const user = await clerkClient.users.getUser(auth.userId);
-      const userEmail = user.emailAddresses.find(
-        (email) => email.id === user.primaryEmailAddressId
-      )?.emailAddress;
-
       const tokenResponse = await clerkClient.users.getUserOauthAccessToken(
         auth.userId,
         "oauth_google"
@@ -147,12 +124,6 @@ app
       oauth2Client.setCredentials({ access_token: accessToken });
       const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
-      // Get the Gmail profile to get the actual Gmail address
-      const profile = await gmail.users.getProfile({ userId: "me" });
-      const gmailAddress = profile.data.emailAddress;
-
-      // Set up watch on user's mailbox
-      // You need to create a Pub/Sub topic first (see setup guide)
       const topicName =
         process.env.GMAIL_PUBSUB_TOPIC ||
         "projects/YOUR_PROJECT/topics/gmail-notifications";
@@ -161,23 +132,15 @@ app
         userId: "me",
         requestBody: {
           topicName,
-          labelIds: ["INBOX"], // Watch inbox only
+          labelIds: ["INBOX"],
         },
-      });
-
-      console.log("Gmail watch setup:", {
-        clerkUserId: auth.userId,
-        userEmail,
-        gmailAddress,
-        historyId: watchResponse.data.historyId,
       });
 
       return c.json({
         success: true,
         historyId: watchResponse.data.historyId,
         expiration: watchResponse.data.expiration,
-        gmailAddress,
-        message: "Gmail watch set up successfully. Expires in 7 days.",
+        message: "Gmail watch set up successfully.",
       });
     } catch (error) {
       console.error("Error setting up Gmail watch:", error);
@@ -191,7 +154,7 @@ app
     }
   })
 
-  // POST /api/emails/stop-watch - Stop Gmail push notifications
+  // Stop Gmail Watch
   .post("/api/emails/stop-watch", async (c) => {
     const auth = getAuth(c);
 
@@ -235,7 +198,7 @@ app
     }
   })
 
-  // GET /api/emails/process-new - Process new emails since last history ID
+  // Process New Emails
   .get("/api/emails/process-new", async (c) => {
     const auth = getAuth(c);
 
@@ -265,7 +228,6 @@ app
       oauth2Client.setCredentials({ access_token: accessToken });
       const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
-      // Fetch new messages using history API
       const newMessages = await fetchGmailHistory(gmail, historyId);
 
       console.log(
@@ -278,20 +240,7 @@ app
           id: msg.id!,
           format: "full",
         });
-
-        const headers = emailData.data.payload?.headers || [];
-        const subject = headers.find((h) => h.name === "Subject")?.value || "";
-        const from = headers.find((h) => h.name === "From")?.value || "";
-        const date = headers.find((h) => h.name === "Date")?.value || "";
-
-        const body = extractEmailBody(emailData.data.payload);
-
-        console.log("\n📧 New Email:", {
-          from,
-          subject,
-          date,
-          bodyPreview: body.substring(0, 200) + "...",
-        });
+        // Log logic here...
       }
 
       return c.json({
@@ -309,7 +258,7 @@ app
     }
   })
 
-  // GET /api/emails/analyze - Analyze Gmail inbox for booking inquiries
+  // Analyze Emails
   .get("/api/emails/analyze", async (c) => {
     const auth = getAuth(c);
 
@@ -319,21 +268,6 @@ app
 
     try {
       const clerkClient = c.get("clerk");
-      const user = await clerkClient.users.getUser(auth.userId);
-
-      // Find Google OAuth account
-      const googleAccount = user.externalAccounts.find(
-        (account) => account.provider === "oauth_google"
-      );
-
-      if (!googleAccount) {
-        return c.json(
-          { error: "Not Connected", message: "Connect Google account first." },
-          403
-        );
-      }
-
-      // Get OAuth access token
       const tokenResponse = await clerkClient.users.getUserOauthAccessToken(
         auth.userId,
         "oauth_google"
@@ -344,13 +278,10 @@ app
       }
 
       const accessToken = tokenResponse.data[0].token;
-
-      // Set up Gmail API client
       const oauth2Client = new google.auth.OAuth2();
       oauth2Client.setCredentials({ access_token: accessToken });
       const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
-      // Fetch recent emails (last 7 days)
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       const query = `after:${Math.floor(sevenDaysAgo.getTime() / 1000)}`;
@@ -362,32 +293,6 @@ app
       });
 
       const messages = response.data.messages || [];
-
-      // Fetch and analyze each email
-      for (const message of messages.slice(0, 10)) {
-        const emailData = await gmail.users.messages.get({
-          userId: "me",
-          id: message.id!,
-          format: "full",
-        });
-
-        const headers = emailData.data.payload?.headers || [];
-        const subject = headers.find((h) => h.name === "Subject")?.value || "";
-        const from = headers.find((h) => h.name === "From")?.value || "";
-        const date = headers.find((h) => h.name === "Date")?.value || "";
-
-        // Extract email body using helper function
-        const body = extractEmailBody(emailData.data.payload);
-
-        console.log("\n📧 Email:", {
-          from,
-          subject,
-          date,
-          bodyPreview: body.substring(0, 200) + "...",
-        });
-
-        // Analyze for booking inquiry using helper function
-      }
 
       return c.json({
         total: messages.length,
@@ -404,7 +309,7 @@ app
     }
   })
 
-  // GET /api/events - Get Google Calendar events from past month
+  // Get Calendar Events
   .get("/api/events", async (c) => {
     const auth = getAuth(c);
 
@@ -419,13 +324,8 @@ app
     }
 
     try {
-      // Get the Clerk client
       const clerkClient = c.get("clerk");
-
-      // Get user to find Google account ID
       const user = await clerkClient.users.getUser(auth.userId);
-
-      // Find the Google OAuth account
       const googleAccount = user.externalAccounts.find(
         (account) => account.provider === "oauth_google"
       );
@@ -441,7 +341,6 @@ app
         );
       }
 
-      // Get the OAuth access token for Google
       const tokenResponse = await clerkClient.users.getUserOauthAccessToken(
         auth.userId,
         "oauth_google"
@@ -459,19 +358,14 @@ app
       }
 
       const accessToken = tokenResponse.data[0].token;
-
-      // Set up Google Calendar API client
       const oauth2Client = new google.auth.OAuth2();
       oauth2Client.setCredentials({ access_token: accessToken });
-
       const calendar = google.calendar({ version: "v3", auth: oauth2Client });
 
-      // Calculate date range (past month)
       const now = new Date();
       const oneMonthAgo = new Date();
       oneMonthAgo.setMonth(now.getMonth() - 1);
 
-      // Fetch calendar events
       const response = await calendar.events.list({
         calendarId: "primary",
         timeMin: oneMonthAgo.toISOString(),
@@ -493,27 +387,10 @@ app
       return c.json(events);
     } catch (error) {
       console.error("Error fetching calendar events:", error);
-
-      // Log more details for debugging
-      if (error && typeof error === "object" && "response" in error) {
-        const apiError = error as any;
-        console.error("API Error details:", {
-          status: apiError.response?.status,
-          statusText: apiError.response?.statusText,
-          data: apiError.response?.data,
-        });
-      }
-
       return c.json(
         {
           error: "Failed to fetch calendar events",
           message: error instanceof Error ? error.message : "Unknown error",
-          details:
-            process.env.NODE_ENV === "development"
-            ? error && typeof error === "object" && "response" in error
-              ? (error as any).response?.data
-              : undefined
-            : undefined,
         },
         500
       );
