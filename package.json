@@ -11,6 +11,8 @@
     "build:backend": "pnpm --filter @daybreak/backend build"
   },
   "devDependencies": {
+    "@prisma/client": "5.19.1",
+    "prisma": "5.19.1",
     "typescript": "^5.6.3"
   }
 }

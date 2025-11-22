@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import {
   useParams,
@@ -36,10 +36,8 @@ import {
   ArrowLeft,
   Mail,
   Copy,
-  Check,
   Trash2,
   MoreVertical,
-  Settings,
 } from "lucide-react";
 import {
   Dialog,
@@ -77,7 +75,6 @@ import {
   SelectValue,
 } from "@/ui/select";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 
 export default function OrganizationDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -88,9 +85,6 @@ export default function OrganizationDetailPage() {
 
   // Determine if we should poll: only if we are on the 'invites' tab AND there are pending invites
   // We need to access the current data to check for pending invites.
-  // Since we can't easily access 'org' before calling useOrganization, we'll start with a default
-  // and then refine the interval based on the fetched data.
-  // However, react-query's refetchInterval can be a function that receives the data.
   const { data: org, isLoading } = useOrganization(id!, {
     refetchInterval: (query) => {
       if (currentTab !== "invites") return false;
@@ -395,11 +389,10 @@ function RolesTab({ orgId, isOwner }: { orgId: string; isOwner: boolean }) {
               ))}
             </TableBody>
           </Table>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
+        </CardContent>
+      </Card>
+    );
+  }
 
 function InvitesTab({
   orgId,
