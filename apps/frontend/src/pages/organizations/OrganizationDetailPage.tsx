@@ -393,6 +393,7 @@ function RolesTab({ orgId, isOwner }: { orgId: string; isOwner: boolean }) {
       </Card>
     );
   }
+}
 
 function InvitesTab({
   orgId,
