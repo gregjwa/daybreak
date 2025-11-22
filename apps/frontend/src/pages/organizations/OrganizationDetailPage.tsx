@@ -389,10 +389,10 @@ function RolesTab({ orgId, isOwner }: { orgId: string; isOwner: boolean }) {
               ))}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
-    );
-  }
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function InvitesTab({
@@ -576,4 +576,3 @@ function InvitesTab({
     </Card>
   );
 }
-
