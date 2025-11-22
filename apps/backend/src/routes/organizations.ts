@@ -38,7 +38,7 @@ const app = new Hono()
       });
 
       // Transform to add "isOwner" flag and flatten membership info
-      const result = organizations.map((org) => {
+      const result = organizations.map((org: any) => {
         const membership = org.members[0]; // Will be defined if they are a member, undefined if only owner
         const isOwner = org.ownerId === auth.userId;
         
@@ -119,7 +119,7 @@ const app = new Hono()
       }
 
       // Check access: must be owner or member
-      const isMember = org.members.some((m) => m.clerkUserId === auth.userId);
+      const isMember = org.members.some((m: any) => m.clerkUserId === auth.userId);
       const isOwner = org.ownerId === auth.userId;
 
       if (!isMember && !isOwner) {
@@ -130,7 +130,7 @@ const app = new Hono()
       const clerkClient = c.get("clerk");
       
       const enrichedMembers = await Promise.all(
-        org.members.map(async (member) => {
+        org.members.map(async (member: any) => {
           try {
             const user = await clerkClient.users.getUser(member.clerkUserId);
             return {
@@ -138,7 +138,7 @@ const app = new Hono()
               user: {
                 firstName: user.firstName,
                 lastName: user.lastName,
-                email: user.emailAddresses.find(e => e.id === user.primaryEmailAddressId)?.emailAddress,
+                email: user.emailAddresses.find((e: any) => e.id === user.primaryEmailAddressId)?.emailAddress,
                 imageUrl: user.imageUrl
               }
             };

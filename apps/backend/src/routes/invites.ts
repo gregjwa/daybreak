@@ -4,6 +4,7 @@ import { prisma } from "../db";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import crypto from "crypto";
+import { Prisma } from "@prisma/client";
 
 const createInviteSchema = z.object({
   email: z.string().email(),
@@ -133,7 +134,7 @@ const app = new Hono()
 
     // Transaction: Verify invite -> Create Member -> Update Invite
     try {
-      const result = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         const invite = await tx.invite.findUnique({
           where: { token },
         });
