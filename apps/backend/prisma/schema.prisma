@@ -1,0 +1,76 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String   // Clerk user ID of the owner
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members   OrganizationMember[]
+  roles     Role[]
+  invites   Invite[]
+
+  @@map("organizations")
+}
+
+model Role {
+  id             String       @id @default(cuid())
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  members        OrganizationMember[]
+  invites        Invite[]
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, name])
+  @@map("roles")
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  clerkUserId    String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  roleId         String?
+  role           Role?        @relation(fields: [roleId], references: [id])
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, clerkUserId])
+  @@map("organization_members")
+}
+
+model Invite {
+  id             String       @id @default(cuid())
+  token          String       @unique
+  email          String
+  status         String       @default("PENDING") // PENDING, ACCEPTED, EXPIRED
+  expiresAt      DateTime
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  roleId         String?
+  role           Role?        @relation(fields: [roleId], references: [id])
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@map("invites")
+}

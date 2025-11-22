@@ -19,12 +19,16 @@
   "dependencies": {
     "@hono/clerk-auth": "^3.0.3",
     "@hono/node-server": "^1.13.7",
+    "@hono/zod-validator": "^0.7.5",
+    "@prisma/client": "5.19.1",
     "dotenv": "^17.2.3",
     "googleapis": "^166.0.0",
-    "hono": "^4.6.14"
+    "hono": "^4.6.14",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "prisma": "5.19.1",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }

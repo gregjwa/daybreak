@@ -5,6 +5,11 @@ import { serve } from "@hono/node-server";
 import { clerkMiddleware, getAuth } from "@hono/clerk-auth";
 import { google } from "googleapis";
 
+// Import new routers
+import organizationsRouter from "./routes/organizations";
+import rolesRouter from "./routes/roles";
+import invitesRouter from "./routes/invites";
+
 // Helper function to extract email body from Gmail message
 function extractEmailBody(payload: any): string {
   let body = "";
@@ -61,8 +66,17 @@ const app = new Hono()
   // Health check
   .get("/health", (c) => {
     return c.json({ status: "ok", timestamp: new Date().toISOString() });
-  })
+  });
 
+// Mount sub-routers
+// Note: The order matters.
+app.route("/api/organizations", organizationsRouter); // /api/organizations, /api/organizations/:id
+app.route("/api/organizations", rolesRouter);         // /api/organizations/:orgId/roles
+app.route("/api/organizations", invitesRouter);       // /api/organizations/:orgId/invites
+app.route("/api/invites", invitesRouter);             // /api/invites/:token/accept, /api/invites/public/:token
+
+// Existing routes (kept inline for now, could be refactored later)
+app
   // POST /api/webhooks/gmail - Receive Gmail push notifications
   .post("/api/webhooks/gmail", async (c) => {
     try {
@@ -87,52 +101,6 @@ const app = new Hono()
 
         // TODO: Implement database lookup and email fetching
         // For now, this is a placeholder showing what needs to happen:
-
-        // Step 1: Look up user in database
-        // const userRecord = await db.getUserByGmailAddress(emailAddress)
-        // if (!userRecord) {
-        //   console.log('No user found for email:', emailAddress)
-        //   return c.json({ success: true })
-        // }
-
-        // Step 2: Get user's OAuth token from Clerk
-        // const clerkClient = c.get('clerk')
-        // const tokenResponse = await clerkClient.users.getUserOauthAccessToken(
-        //   userRecord.clerkUserId,
-        //   'oauth_google'
-        // )
-        // const accessToken = tokenResponse.data[0].token
-
-        // Step 3: Set up Gmail client
-        // const oauth2Client = new google.auth.OAuth2()
-        // oauth2Client.setCredentials({ access_token: accessToken })
-        // const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
-
-        // Step 4: Fetch new messages
-        // const newMessages = await fetchGmailHistory(gmail, historyId)
-        // console.log(`📨 Found ${newMessages.length} new messages`)
-
-        // Step 5: Log each email's content
-        // for (const msg of newMessages) {
-        //   const emailData = await gmail.users.messages.get({
-        //     userId: 'me',
-        //     id: msg.id,
-        //     format: 'full',
-        //   })
-        //
-        //   const headers = emailData.data.payload?.headers || []
-        //   const subject = headers.find((h) => h.name === 'Subject')?.value || ''
-        //   const from = headers.find((h) => h.name === 'From')?.value || ''
-        //   const date = headers.find((h) => h.name === 'Date')?.value || ''
-        //   const body = extractEmailBody(emailData.data.payload)
-        //
-        //   console.log('\n📧 New Email via Webhook:', {
-        //     from,
-        //     subject,
-        //     date,
-        //     body: body.substring(0, 500)
-        //   })
-        // }
 
         console.log(
           "\n⚠️  Database required: Cannot fetch emails without user credentials mapping"
@@ -196,14 +164,6 @@ const app = new Hono()
           labelIds: ["INBOX"], // Watch inbox only
         },
       });
-
-      // TODO: Store this mapping in database for webhook processing
-      // await db.upsert('gmail_watches', {
-      //   gmailAddress,
-      //   clerkUserId: auth.userId,
-      //   historyId: watchResponse.data.historyId,
-      //   expiresAt: watchResponse.data.expiration
-      // })
 
       console.log("Gmail watch setup:", {
         clerkUserId: auth.userId,
@@ -550,10 +510,10 @@ const app = new Hono()
           message: error instanceof Error ? error.message : "Unknown error",
           details:
             process.env.NODE_ENV === "development"
-              ? error && typeof error === "object" && "response" in error
-                ? (error as any).response?.data
-                : undefined
-              : undefined,
+            ? error && typeof error === "object" && "response" in error
+              ? (error as any).response?.data
+              : undefined
+            : undefined,
         },
         500
       );
