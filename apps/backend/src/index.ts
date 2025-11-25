@@ -245,7 +245,7 @@ const app = new Hono()
           id: msg.id!,
           format: "full",
         });
-        
+
         const headers = emailData.data.payload?.headers || [];
         const subject = headers.find((h) => h.name === "Subject")?.value || "";
         const from = headers.find((h) => h.name === "From")?.value || "";
@@ -314,21 +314,21 @@ const app = new Hono()
 
       // Fetch and analyze each email (simplified for analyzer endpoint)
       for (const message of messages.slice(0, 10)) {
-         const emailData = await gmail.users.messages.get({
-           userId: "me",
-           id: message.id!,
-           format: "full",
-         });
-         const headers = emailData.data.payload?.headers || [];
-         const subject = headers.find((h) => h.name === "Subject")?.value || "";
-         const from = headers.find((h) => h.name === "From")?.value || "";
-         
-         // Use variables to avoid unused warnings if we were logging them, 
-         // but here we just return count.
-         // To suppress unused warning for this loop iteration variables:
-         void subject;
-         void from;
-         void emailData; 
+        const emailData = await gmail.users.messages.get({
+          userId: "me",
+          id: message.id!,
+          format: "full",
+        });
+        const headers = emailData.data.payload?.headers || [];
+        const subject = headers.find((h) => h.name === "Subject")?.value || "";
+        const from = headers.find((h) => h.name === "From")?.value || "";
+
+        // Use variables to avoid unused warnings if we were logging them,
+        // but here we just return count.
+        // To suppress unused warning for this loop iteration variables:
+        void subject;
+        void from;
+        void emailData;
       }
 
       return c.json({
@@ -415,10 +415,12 @@ const app = new Hono()
       const events =
         response.data.items?.map((event) => ({
           id: event.id || "",
-          name: event.summary || "Untitled Event",
-          date: event.start?.dateTime || event.start?.date || "",
+          title: event.summary || "Untitled Event",
+          start: event.start?.dateTime || event.start?.date || "",
+          end: event.end?.dateTime || event.end?.date || "",
           description: event.description || "",
           location: event.location || "",
+          color: event.colorId || undefined,
         })) || [];
 
       return c.json(events);
