@@ -1,11 +1,8 @@
 import { hc } from 'hono/client'
 import type { AppType } from '@daybreak/backend'
+import { getApiBaseUrl } from '@/lib/apiBase'
 
-const API_URL = import.meta.env.VITE_API_URL
-
-if (!API_URL) {
-  throw new Error('Missing VITE_API_URL environment variable')
-}
+const API_URL = getApiBaseUrl()
 
 // Create the Hono RPC client with full type safety
 // Note: This client should be used with Clerk's auth token

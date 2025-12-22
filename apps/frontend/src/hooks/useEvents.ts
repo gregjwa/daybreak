@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@clerk/clerk-react'
+import { getApiBaseUrl } from '@/lib/apiBase'
 
 // Define the response type manually based on what the backend returns
 // This bypasses the TS inference issue if the route isn't perfectly typed in the client
@@ -45,7 +46,7 @@ export function useEvents() {
       // as we are focusing on CRM Project/Vendor flow.
       // OR better, just use fetch to /api/events and let it fail gracefully if 404.
       
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/events`, {
+      const res = await fetch(`${getApiBaseUrl()}/events`, {
           headers: {
               Authorization: `Bearer ${token}`
           }

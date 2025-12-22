@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@clerk/clerk-react";
+import { getApiBaseUrl } from "@/lib/apiBase";
 
 // Types (Mirroring backend prisma types roughly)
 export interface Project {
@@ -39,7 +40,7 @@ export interface ContactMethod {
     isPrimary: boolean;
 }
 
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000/api").replace(/\/$/, "");
+const API_URL = getApiBaseUrl();
 
 async function fetcher(url: string, token: string | null) {
   const res = await fetch(`${API_URL}${url}`, {
