@@ -1,12 +1,10 @@
-import { createBrowserRouter, Outlet, RouterProvider, useMatches } from "react-router-dom";
-import { SidebarProvider, SidebarTrigger } from "@/ui/sidebar";
+import { createBrowserRouter, Outlet, RouterProvider } from "react-router-dom";
 // We'll assume a RootLayout exists or we define a simple one here for now.
 import RootLayout from "@/components/RootLayout"; 
 import InviteLandingPage from "@/pages/invite-landing/InviteLandingPage";
 import OrganizationsPage from "@/pages/organizations/OrganizationsPage";
 import OrganizationDetailPage from "@/pages/organizations/OrganizationDetailPage";
 import ProjectVendors from "@/pages/projects/ProjectVendors";
-import { Suspense } from "react";
 
 // Placeholder for Project Overview
 const ProjectOverview = () => <div className="p-8">Project Overview (Coming Soon)</div>;

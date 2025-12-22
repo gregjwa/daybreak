@@ -1,14 +1,14 @@
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useProject, ProjectSupplier } from "@/api/useProjects";
+import { useProject } from "@/api/useProjects";
 import { DataTable } from "@/components/data-table/DataTable";
 import { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/ui/tabs";
 import { InteractiveCell, StatusCell } from "@/components/data-table/Cells";
-import { Plus, Filter, LayoutGrid, List } from "lucide-react";
+import { Plus, Filter, LayoutGrid } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/ui/avatar";
-import { AddVendorDialog } from "./AddVendorDialog"; // We'll create this next
+import { AddVendorDialog } from "./AddVendorDialog"; 
+import { cn } from "@/lib/utils";
 
 // --- Types ---
 // Flattened structure for the table
@@ -191,7 +191,3 @@ export default function ProjectVendors() {
         </div>
     );
 }
-
-// Utility class merge
-import { cn } from "@/lib/utils";
-

@@ -1,15 +1,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
-import { Button } from "@/ui/button";
 import { Pencil, Check } from "lucide-react";
 
 // --- Interactive Cell Wrapper ---
@@ -53,10 +45,6 @@ const DEFAULT_STATUS_OPTIONS = [
 export const StatusCell = ({ value, onChange, options = DEFAULT_STATUS_OPTIONS }: StatusCellProps) => {
   const currentOption = options.find((o) => o.value === value) || { label: value, value, color: "bg-gray-100" };
 
-  // Use a simple Popover or Native Select for better mobile/performance?
-  // Shadcn Select is nice but might be heavy for every cell if not virtualized. 
-  // Let's use a trigger that looks like a badge.
-
   return (
     <Popover>
         <PopoverTrigger asChild>
@@ -77,7 +65,7 @@ export const StatusCell = ({ value, onChange, options = DEFAULT_STATUS_OPTIONS }
                             value === opt.value && "bg-accent"
                         )}
                     >
-                        <div className={cn("w-2 h-2 rounded-full mr-2", opt.color.replace("bg-", "bg-").split(" ")[0])} />
+                        <div className={cn("w-2 h-2 rounded-full mr-2", opt.color?.replace("bg-", "bg-").split(" ")[0])} />
                         {opt.label}
                         {value === opt.value && <Check className="ml-auto h-3 w-3 opacity-50" />}
                     </button>
@@ -87,4 +75,3 @@ export const StatusCell = ({ value, onChange, options = DEFAULT_STATUS_OPTIONS }
     </Popover>
   );
 };
-

@@ -1,4 +1,3 @@
-import * as React from "react";
 import {
   ColumnDef,
   flexRender,
@@ -78,4 +77,3 @@ export function DataTable<TData, TValue>({
     </div>
   );
 }
-

@@ -6,8 +6,7 @@ import { Input } from "@/ui/input";
 import { Label } from "@/ui/label";
 import { useSuppliers, useCreateSupplier } from "@/api/useSuppliers";
 import { useAddProjectSupplier } from "@/api/useProjects";
-import { Check, Plus, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Plus, Loader2 } from "lucide-react";
 
 interface AddVendorDialogProps {
   isOpen: boolean;
@@ -157,4 +156,3 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
     </Dialog>
   );
 }
-
