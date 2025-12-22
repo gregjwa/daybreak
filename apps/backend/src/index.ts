@@ -61,7 +61,6 @@ const app = new Hono()
         console.log(
           `\n🔔 New email notification for ${emailAddress}, historyId: ${historyId}`
         );
-
         // Find User by email address in GmailWatch
         const watch = await prisma.gmailWatch.findFirst({
             where: { emailAddress },
