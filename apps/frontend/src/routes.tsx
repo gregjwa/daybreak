@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, Outlet, RouterProvider } from "react-router-dom";
 // We'll assume a RootLayout exists or we define a simple one here for now.
 import RootLayout from "@/components/RootLayout"; 
@@ -6,6 +7,17 @@ import OrganizationsPage from "@/pages/organizations/OrganizationsPage";
 import OrganizationDetailPage from "@/pages/organizations/OrganizationDetailPage";
 import ProjectVendors from "@/pages/projects/ProjectVendors";
 import ProjectList from "@/pages/projects/ProjectList";
+
+// Lazy load supplier pages
+const SuppliersPage = lazy(() => import("@/pages/suppliers/SuppliersPage"));
+const SupplierDetailPage = lazy(() => import("@/pages/suppliers/SupplierDetailPage"));
+
+// Loading fallback
+const PageLoader = () => (
+  <div className="flex h-full items-center justify-center">
+    <div className="text-muted-foreground">Loading...</div>
+  </div>
+);
 
 // Placeholder for Project Overview
 const ProjectOverview = () => <div className="p-8">Project Overview (Coming Soon)</div>;
@@ -54,7 +66,23 @@ export const router = createBrowserRouter([
                 element: <ProjectVendors />
             }
         ]
-      }
+      },
+      {
+        path: "suppliers",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <SuppliersPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "suppliers/:supplierId",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <SupplierDetailPage />
+          </Suspense>
+        ),
+      },
     ],
   },
   {

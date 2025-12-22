@@ -1,11 +1,56 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@clerk/clerk-react";
-import { Supplier } from "./useProjects";
 import { getApiBaseUrl } from "@/lib/apiBase";
+import { SupplierCategory } from "./useSupplierCategories";
 
 const API_URL = getApiBaseUrl();
 
-async function fetcher(url: string, token: string | null) {
+export interface ContactMethod {
+  id: string;
+  type: string;
+  value: string;
+  label?: string | null;
+  isPrimary: boolean;
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  notes?: string | null;
+  categoryId?: string | null;
+  category?: SupplierCategory | null;
+  contactMethods: ContactMethod[];
+  _count?: {
+    projectSuppliers?: number;
+    messages?: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupplierDetail extends Supplier {
+  projectSuppliers: {
+    id: string;
+    role: string;
+    status: string;
+    quoteAmount?: number | null;
+    project: {
+      id: string;
+      name: string;
+      type: string;
+      date?: string | null;
+    };
+  }[];
+  messages: {
+    id: string;
+    content: string;
+    direction: string;
+    sentAt: string;
+    project?: { id: string; name: string } | null;
+  }[];
+}
+
+async function fetcher<T>(url: string, token: string | null): Promise<T> {
   const res = await fetch(`${API_URL}${url}`, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -20,8 +65,26 @@ export function useSuppliers() {
   const { getToken } = useAuth();
   return useQuery<Supplier[]>({
     queryKey: ["suppliers"],
-    queryFn: async () => fetcher("/suppliers", await getToken()),
+    queryFn: async () => fetcher<Supplier[]>("/suppliers", await getToken()),
   });
+}
+
+export function useSupplier(supplierId: string | undefined) {
+  const { getToken } = useAuth();
+  return useQuery<SupplierDetail>({
+    queryKey: ["suppliers", supplierId],
+    queryFn: async () => fetcher<SupplierDetail>(`/suppliers/${supplierId}`, await getToken()),
+    enabled: !!supplierId,
+  });
+}
+
+export interface CreateSupplierData {
+  name: string;
+  categoryId?: string;
+  categoryName?: string;
+  notes?: string;
+  email?: string;
+  phone?: string;
 }
 
 export function useCreateSupplier() {
@@ -29,7 +92,7 @@ export function useCreateSupplier() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: Partial<Supplier> & { email?: string; phone?: string }) => {
+    mutationFn: async (data: CreateSupplierData) => {
       const token = await getToken();
       const res = await fetch(`${API_URL}/suppliers`, {
         method: "POST",
@@ -40,10 +103,42 @@ export function useCreateSupplier() {
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error("Failed to create supplier");
-      return res.json();
+      return res.json() as Promise<Supplier>;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+    },
+  });
+}
+
+export interface UpdateSupplierData {
+  name?: string;
+  categoryId?: string;
+  categoryName?: string;
+  notes?: string;
+}
+
+export function useUpdateSupplier() {
+  const { getToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: UpdateSupplierData }) => {
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/suppliers/${id}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update supplier");
+      return res.json() as Promise<Supplier>;
+    },
+    onSuccess: (_, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["suppliers", id] });
     },
   });
 }

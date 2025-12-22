@@ -10,12 +10,14 @@ interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
   onRowClick?: (row: TData) => void;
+  className?: string;
 }
 
 export function DataTable<TData, TValue>({
   columns,
   data,
   onRowClick,
+  className,
 }: DataTableProps<TData, TValue>) {
   const table = useReactTable({
     data,
@@ -24,16 +26,19 @@ export function DataTable<TData, TValue>({
   });
 
   return (
-    <div className="w-full overflow-hidden rounded-md border border-border-subtle bg-surface-card shadow-soft">
-      <table className="w-full caption-bottom text-sm">
-        <thead className="bg-surface-canvas border-b border-border-subtle">
+    <div className={cn("w-full overflow-hidden rounded-md border border-border bg-card", className)}>
+      <table className="w-full caption-bottom text-sm border-collapse">
+        <thead className="bg-muted/30 border-b">
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id}>
-              {headerGroup.headers.map((header) => {
+              {headerGroup.headers.map((header, idx) => {
                 return (
                   <th
                     key={header.id}
-                    className="h-10 px-4 text-left align-middle font-sans text-xs font-medium text-muted-foreground uppercase tracking-wider"
+                    className={cn(
+                      "h-9 px-3 text-left align-middle font-sans text-[11px] font-medium text-muted-foreground uppercase tracking-wider",
+                      idx > 0 && "border-l border-border/50"
+                    )}
                   >
                     {header.isPlaceholder
                       ? null
@@ -54,12 +59,19 @@ export function DataTable<TData, TValue>({
                 key={row.id}
                 onClick={() => onRowClick?.(row.original)}
                 className={cn(
-                  "border-b border-border-subtle transition-colors hover:bg-surface-hover group",
+                  "border-b border-border/50 transition-colors",
+                  "hover:bg-muted/40",
                   onRowClick && "cursor-pointer"
                 )}
               >
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="p-0 align-middle">
+                {row.getVisibleCells().map((cell, idx) => (
+                  <td
+                    key={cell.id}
+                    className={cn(
+                      "p-0 align-middle",
+                      idx > 0 && "border-l border-border/50"
+                    )}
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}
@@ -67,7 +79,7 @@ export function DataTable<TData, TValue>({
             ))
           ) : (
             <tr>
-              <td colSpan={columns.length} className="h-24 text-center">
+              <td colSpan={columns.length} className="h-24 text-center text-muted-foreground">
                 No results.
               </td>
             </tr>

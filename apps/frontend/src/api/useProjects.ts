@@ -1,6 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@clerk/clerk-react";
 import { getApiBaseUrl } from "@/lib/apiBase";
+import { Supplier, ContactMethod } from "./useSuppliers";
+import { SupplierCategory } from "./useSupplierCategories";
+
+// Re-export for convenience
+export type { Supplier, ContactMethod, SupplierCategory };
 
 // Types (Mirroring backend prisma types roughly)
 export interface Project {
@@ -14,6 +19,15 @@ export interface Project {
   suppliers?: ProjectSupplier[];
 }
 
+export interface ProjectSupplierWithMessage extends Supplier {
+  messages?: {
+    id: string;
+    content: string;
+    direction: string;
+    sentAt: string;
+  }[];
+}
+
 export interface ProjectSupplier {
     id: string;
     projectId: string;
@@ -22,22 +36,7 @@ export interface ProjectSupplier {
     status: string;
     quoteAmount?: number;
     notes?: string;
-    supplier?: Supplier;
-}
-
-export interface Supplier {
-    id: string;
-    name: string;
-    category: string;
-    notes?: string;
-    contactMethods: ContactMethod[];
-}
-
-export interface ContactMethod {
-    id: string;
-    type: "EMAIL" | "PHONE" | "WHATSAPP" | "OTHER";
-    value: string;
-    isPrimary: boolean;
+    supplier?: ProjectSupplierWithMessage;
 }
 
 const API_URL = getApiBaseUrl();

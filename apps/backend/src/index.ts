@@ -12,6 +12,7 @@ import organizationsRouter from "./routes/organizations";
 import rolesRouter from "./routes/roles";
 import invitesRouter from "./routes/invites";
 import suppliersRouter from "./routes/suppliers";
+import supplierCategoriesRouter from "./routes/supplier-categories";
 import projectsRouter from "./routes/projects";
 import messagesRouter from "./routes/messages";
 import gmailRouter from "./routes/gmail";
@@ -45,6 +46,7 @@ const app = new Hono()
 
   // CRM Routes
   .route("/api/suppliers", suppliersRouter)
+  .route("/api/supplier-categories", supplierCategoriesRouter)
   .route("/api/projects", projectsRouter)
   .route("/api/messages", messagesRouter)
   .route("/api/emails", gmailRouter)

@@ -24,7 +24,7 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
   const [searchQuery, setSearchQuery] = useState("");
 
   // Create State
-  const [newVendor, setNewVendor] = useState({ name: "", category: "", email: "" });
+  const [newVendor, setNewVendor] = useState({ name: "", categoryName: "", email: "" });
 
   const handleLink = (supplierId: string) => {
     linkSupplier({
@@ -40,8 +40,8 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
     try {
         const supplier = await createSupplier({
             name: newVendor.name,
-            category: newVendor.category || "General",
-            email: newVendor.email
+            categoryName: newVendor.categoryName || undefined,
+            email: newVendor.email || undefined,
         });
         
         // Auto link after create
@@ -91,7 +91,7 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
                                 >
                                     <div className="flex flex-col">
                                         <span className="font-medium text-foreground">{supplier.name}</span>
-                                        <span className="text-xs text-muted-foreground">{supplier.category}</span>
+                                        <span className="text-xs text-muted-foreground">{supplier.category?.name || "No category"}</span>
                                     </div>
                                     {isLinking && <Loader2 className="h-4 w-4 animate-spin" />}
                                 </CommandItem>
@@ -127,8 +127,8 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
                     <Label htmlFor="category">Category</Label>
                     <Input 
                         id="category" 
-                        value={newVendor.category} 
-                        onChange={e => setNewVendor({...newVendor, category: e.target.value})}
+                        value={newVendor.categoryName} 
+                        onChange={e => setNewVendor({...newVendor, categoryName: e.target.value})}
                         placeholder="Florist, Caterer..." 
                         className="bg-surface-canvas border-border-subtle"
                     />

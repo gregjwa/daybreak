@@ -65,7 +65,7 @@ export default function ProjectVendors() {
                 id: ps.id,
                 supplierId: ps.supplierId,
                 name: ps.supplier?.name || "Unknown",
-                category: ps.supplier?.category || "Uncategorized",
+                category: ps.supplier?.category?.name || "Uncategorized",
                 role: ps.role,
                 status: ps.status,
                 quoteAmount: ps.quoteAmount,

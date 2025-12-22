@@ -85,21 +85,41 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  projects   Project[]
-  suppliers  Supplier[]
-  gmailWatch GmailWatch?
+  projects           Project[]
+  suppliers          Supplier[]
+  supplierCategories SupplierCategory[]
+  gmailWatch         GmailWatch?
 
   @@map("users")
+}
+
+model SupplierCategory {
+  id        String   @id @default(cuid())
+  name      String   // Display name, e.g. "Florist"
+  slug      String   // Lowercase normalized, e.g. "florist"
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  suppliers Supplier[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, slug])
+  @@map("supplier_categories")
 }
 
 model Supplier {
   id        String   @id @default(cuid())
   name      String   // Business Name or Primary Contact Name
-  category  String   // e.g., "Florist"
   notes     String?
   
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  categoryId String?
+  category   SupplierCategory? @relation(fields: [categoryId], references: [id])
 
   contactMethods   ContactMethod[]
   projectSuppliers ProjectSupplier[]

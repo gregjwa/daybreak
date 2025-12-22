@@ -57,6 +57,7 @@ const app = new Hono()
           include: {
             supplier: {
               include: { 
+                category: true,
                 contactMethods: true,
                 // Include the supplier's most recent message
                 messages: {

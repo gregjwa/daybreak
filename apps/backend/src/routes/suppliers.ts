@@ -6,11 +6,18 @@ import { z } from "zod";
 
 const createSupplierSchema = z.object({
   name: z.string().min(1),
-  company: z.string().optional(),
-  category: z.string().min(1),
+  categoryId: z.string().optional(),    // Link to existing category
+  categoryName: z.string().optional(),  // Or create new category by name (hybrid)
   notes: z.string().optional(),
   email: z.string().email().optional(), // Initial contact method
   phone: z.string().optional(),         // Initial contact method
+});
+
+const updateSupplierSchema = z.object({
+  name: z.string().min(1).optional(),
+  categoryId: z.string().optional(),
+  categoryName: z.string().optional(),
+  notes: z.string().optional(),
 });
 
 const addContactMethodSchema = z.object({
@@ -20,21 +27,31 @@ const addContactMethodSchema = z.object({
   isPrimary: z.boolean().default(false),
 });
 
-// Helper to ensure local User exists
-async function getOrCreateUser(clerkUserId: string, email: string) {
-  let user = await prisma.user.findUnique({
-    where: { clerkId: clerkUserId },
-  });
+// Helper: slugify category name
+function slugify(name: string): string {
+  return name.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+}
 
-  if (!user) {
-    user = await prisma.user.create({
+// Helper: get or create category by name (hybrid suggest + dedupe)
+async function getOrCreateCategory(userId: string, categoryName: string) {
+  const slug = slugify(categoryName);
+  if (!slug) return null;
+  
+  let category = await prisma.supplierCategory.findUnique({
+    where: { userId_slug: { userId, slug } },
+  });
+  
+  if (!category) {
+    category = await prisma.supplierCategory.create({
       data: {
-        clerkId: clerkUserId,
-        email: email, // Assuming email is available from auth/clerk context or passed in
+        userId,
+        name: categoryName.trim(),
+        slug,
       },
     });
   }
-  return user;
+  
+  return category;
 }
 
 const app = new Hono()
@@ -43,11 +60,6 @@ const app = new Hono()
     const auth = getAuth(c);
     if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
 
-    // Ensure user exists (optional here if we trust sync, but good to be safe)
-    // For listing, we can just query by clerkId on User table if we link it?
-    // But Supplier is linked to User.id (UUID), not Clerk ID.
-    // So we need to find the User.id first.
-    
     const user = await prisma.user.findUnique({
       where: { clerkId: auth.userId },
     });
@@ -59,13 +71,68 @@ const app = new Hono()
     const suppliers = await prisma.supplier.findMany({
       where: { userId: user.id },
       include: {
+        category: true,
         contactMethods: true,
-        _count: { select: { projectSuppliers: true } }
+        _count: { select: { projectSuppliers: true, messages: true } }
       },
       orderBy: { createdAt: "desc" },
     });
 
     return c.json(suppliers);
+  })
+
+  // GET /api/suppliers/:id - Get supplier detail with projects + messages
+  .get("/:id", async (c) => {
+    const auth = getAuth(c);
+    const supplierId = c.req.param("id");
+    
+    if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
+
+    const user = await prisma.user.findUnique({
+      where: { clerkId: auth.userId },
+    });
+
+    if (!user) return c.json({ error: "User not found" }, 404);
+
+    const supplier = await prisma.supplier.findUnique({
+      where: { id: supplierId },
+      include: {
+        category: true,
+        contactMethods: true,
+        projectSuppliers: {
+          include: {
+            project: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                date: true,
+              },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        },
+        messages: {
+          take: 20,
+          orderBy: { sentAt: "desc" },
+          select: {
+            id: true,
+            content: true,
+            direction: true,
+            sentAt: true,
+            project: {
+              select: { id: true, name: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!supplier || supplier.userId !== user.id) {
+      return c.json({ error: "Supplier not found" }, 404);
+    }
+
+    return c.json(supplier);
   })
 
   // POST /api/suppliers - Create a new supplier
@@ -75,11 +142,6 @@ const app = new Hono()
 
     const data = c.req.valid("json");
     
-    // We need the user's email to create the User record if it doesn't exist.
-    // getAuth doesn't provide email. 
-    // We assume the User record might already exist from webhook or previous interaction.
-    // If not, we might fail or need to fetch from Clerk.
-    // For now, let's try to find the user.
     let user = await prisma.user.findUnique({
       where: { clerkId: auth.userId },
     });
@@ -102,24 +164,20 @@ const app = new Hono()
       });
     }
 
+    // Resolve category: use categoryId, or create from categoryName (hybrid)
+    let categoryId: string | null = null;
+    if (data.categoryId) {
+      categoryId = data.categoryId;
+    } else if (data.categoryName) {
+      const category = await getOrCreateCategory(user.id, data.categoryName);
+      categoryId = category?.id || null;
+    }
+
     // Create Supplier and ContactMethods
     const supplier = await prisma.supplier.create({
       data: {
         name: data.name,
-        // company: data.company, // Add to schema if needed, currently not in schema but in plan description? 
-        // Wait, schema has `name` but plan description had `company`. 
-        // My schema: `name String`, `category String`, `notes String?`. 
-        // I should probably map `company` to `name` or `notes` or add it? 
-        // The schema I applied: `name String`, `category String`, `notes String?`. No `company` field in schema I wrote!
-        // Plan schema: `name String`, `company String?`.
-        // I missed `company` in my schema write.
-        // I will put company in notes or just ignore for now to match schema.
-        // Or I can update schema. But that requires another push.
-        // Let's check schema again.
-        // `model Supplier { id, name, category, notes, userId ... }`
-        // Okay, I will skip `company` for now and just use `name`.
-        
-        category: data.category,
+        categoryId,
         notes: data.notes,
         userId: user.id,
         contactMethods: {
@@ -130,11 +188,55 @@ const app = new Hono()
         },
       },
       include: {
+        category: true,
         contactMethods: true,
       },
     });
 
     return c.json(supplier, 201);
+  })
+
+  // PATCH /api/suppliers/:id - Update a supplier
+  .patch("/:id", zValidator("json", updateSupplierSchema), async (c) => {
+    const auth = getAuth(c);
+    const supplierId = c.req.param("id");
+    
+    if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
+
+    const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
+    if (!user) return c.json({ error: "User not found" }, 404);
+
+    // Verify ownership
+    const existing = await prisma.supplier.findUnique({ where: { id: supplierId } });
+    if (!existing || existing.userId !== user.id) {
+      return c.json({ error: "Supplier not found" }, 404);
+    }
+
+    const data = c.req.valid("json");
+
+    // Resolve category
+    let categoryId: string | undefined = undefined;
+    if (data.categoryId !== undefined) {
+      categoryId = data.categoryId;
+    } else if (data.categoryName) {
+      const category = await getOrCreateCategory(user.id, data.categoryName);
+      categoryId = category?.id;
+    }
+
+    const supplier = await prisma.supplier.update({
+      where: { id: supplierId },
+      data: {
+        ...(data.name && { name: data.name }),
+        ...(categoryId !== undefined && { categoryId }),
+        ...(data.notes !== undefined && { notes: data.notes }),
+      },
+      include: {
+        category: true,
+        contactMethods: true,
+      },
+    });
+
+    return c.json(supplier);
   })
 
   // POST /api/suppliers/:id/contacts - Add contact method
