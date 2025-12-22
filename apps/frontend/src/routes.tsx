@@ -5,10 +5,10 @@ import InviteLandingPage from "@/pages/invite-landing/InviteLandingPage";
 import OrganizationsPage from "@/pages/organizations/OrganizationsPage";
 import OrganizationDetailPage from "@/pages/organizations/OrganizationDetailPage";
 import ProjectVendors from "@/pages/projects/ProjectVendors";
+import ProjectList from "@/pages/projects/ProjectList";
 
 // Placeholder for Project Overview
 const ProjectOverview = () => <div className="p-8">Project Overview (Coming Soon)</div>;
-const ProjectList = () => <div className="p-8">All Projects List (Coming Soon)</div>;
 
 // Layout for Project Section (Sidebar context etc)
 const ProjectLayout = () => {
