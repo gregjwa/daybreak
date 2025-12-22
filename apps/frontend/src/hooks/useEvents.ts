@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@clerk/clerk-react'
-import { client } from '@/lib/api'
 
 // Define the response type manually based on what the backend returns
 // This bypasses the TS inference issue if the route isn't perfectly typed in the client
