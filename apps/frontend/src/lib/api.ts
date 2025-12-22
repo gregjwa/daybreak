@@ -1,8 +1,11 @@
 import { hc } from 'hono/client'
 import type { AppType } from '@daybreak/backend'
-import { getApiBaseUrl } from '@/lib/apiBase'
+import { getApiOriginUrl } from '@/lib/apiBase'
 
-const API_URL = getApiBaseUrl()
+// IMPORTANT:
+// - Hono RPC client paths in AppType already include `/api/...`
+// - so the base MUST be the origin (no trailing /api)
+const API_URL = getApiOriginUrl()
 
 // Create the Hono RPC client with full type safety
 // Note: This client should be used with Clerk's auth token

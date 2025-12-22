@@ -14,6 +14,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/ui/sheet";
 import { Button } from "@/ui/button";
 import { Menu, Calendar, Users, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useGmailWatch } from "@/hooks/useGmailWatch";
 
 const NavLink = ({
   to,
@@ -72,6 +73,10 @@ const RootLayout = () => {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const { isSignedIn } = useAuth();
   const navigate = useNavigate();
+
+  // Auto-enable Gmail watch for signed-in users with Google connected.
+  // This ensures the webhook can map emailAddress -> user via GmailWatch row.
+  useGmailWatch();
 
   // Check for pending invite after redirect from auth
   useEffect(() => {
