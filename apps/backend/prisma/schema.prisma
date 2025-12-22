@@ -74,3 +74,135 @@ model Invite {
 
   @@map("invites")
 }
+
+// --- CRM Models ---
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects   Project[]
+  suppliers  Supplier[]
+  gmailWatch GmailWatch?
+
+  @@map("users")
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String   // Business Name or Primary Contact Name
+  category  String   // e.g., "Florist"
+  notes     String?
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  contactMethods   ContactMethod[]
+  projectSuppliers ProjectSupplier[]
+  messages         Message[] // Aggregate messages for the supplier
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("suppliers")
+}
+
+model ContactMethod {
+  id         String   @id @default(cuid())
+  type       String   // "EMAIL", "PHONE", "WHATSAPP", etc.
+  value      String   // actual email address or phone number
+  label      String?  // e.g., "Main Office", "Emergency", "Bob's Cell"
+  isPrimary  Boolean  @default(false)
+
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  messages   Message[] // Messages specifically via this method
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([value]) // Fast lookup for incoming webhooks
+  @@map("contact_methods")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  date        DateTime?
+  budget      Decimal? @db.Decimal(10, 2)
+  description String?
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  suppliers ProjectSupplier[]
+  messages  Message[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("projects")
+}
+
+model ProjectSupplier {
+  id             String   @id @default(cuid())
+  
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  supplierId     String
+  supplier       Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  role           String
+  status         String   @default("NEEDED")
+  quoteAmount    Decimal? @db.Decimal(10, 2)
+  notes          String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([projectId, supplierId])
+  @@map("project_suppliers")
+}
+
+model Message {
+  id              String   @id @default(cuid())
+  
+  content         String   @db.Text
+  direction       String   // "INBOUND", "OUTBOUND"
+  sentAt          DateTime @default(now())
+  externalId      String?  // External Message ID
+  
+  // Links
+  projectId       String?
+  project         Project? @relation(fields: [projectId], references: [id])
+  
+  supplierId      String?
+  supplier        Supplier? @relation(fields: [supplierId], references: [id])
+  
+  contactMethodId String?
+  contactMethod   ContactMethod? @relation(fields: [contactMethodId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("messages")
+}
+
+model GmailWatch {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailAddress String
+  historyId    String
+  expiration   BigInt
+  updatedAt    DateTime @updatedAt
+
+  @@map("gmail_watches")
+}

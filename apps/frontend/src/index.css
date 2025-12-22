@@ -1,14 +1,35 @@
 @import "tailwindcss";
 @source "../node_modules/@omerbres/react-simple-calendar";
 @import "tw-animate-css";
+/* Import fonts */
+@import "@fontsource/lora/400.css";
+@import "@fontsource/lora/500.css";
+@import "@fontsource/lora/600.css";
+@import "@fontsource/lora/700.css";
+/* Geist Sans is loaded via JS in main.tsx or index.html usually, but if using npm package: */
+/* We will assume it's imported in main.tsx or similar for now, or just use system sans if not mapped perfectly */
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /* Radii - Keeping existing map but adjusting base var */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  
+  /* Fonts */
+  --font-display: "Lora", serif;
+  --font-sans: "Geist", "Inter", sans-serif;
+
+  /* Extended Semantic Colors */
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-card: var(--surface-card);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-border-subtle: var(--border-subtle);
+  
+  /* Existing Mappings */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -40,33 +61,61 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Shadows */
+  --shadow-soft: 0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 4px 16px -4px rgba(0, 0, 0, 0.02);
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Core Foundation */
+  --radius: 0.5rem; /* 8px - Moderate, precise */
+  
+  /* Light Mode Palette (Attio-inspired) */
+  /* Backgrounds: Very bright, clean */
+  --background: oklch(0.985 0.002 247.839); /* Slightly cool white/gray */
+  --surface-canvas: oklch(0.985 0.002 247.839);
+  --surface-card: oklch(1 0 0); /* Pure white for lifting */
+  --surface-hover: oklch(0.97 0.002 247.839);
+  --surface-active: oklch(0.95 0.005 247.839);
+  
+  --foreground: oklch(0.145 0.01 250); /* Nearly black, softened */
+  
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
+  
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  
+  /* Primary: Deep, sophisticated blue/slate */
+  --primary: oklch(0.205 0.04 250);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  
+  /* Secondary: Soft gray */
+  --secondary: oklch(0.96 0.005 250);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
+  
+  /* Muted: Lighter gray for secondary text */
+  --muted: oklch(0.96 0.005 250);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  
+  --accent: oklch(0.96 0.005 250);
   --accent-foreground: oklch(0.205 0 0);
+  
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  
+  /* Borders: Very subtle */
+  --border: oklch(0.92 0.005 250);
+  --border-subtle: oklch(0.94 0.005 250);
+  --input: oklch(0.92 0.005 250);
   --ring: oklch(0.708 0 0);
+  
+  /* Charts */
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+  
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -78,30 +127,46 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: oklch(0.12 0.01 250);
+  --surface-canvas: oklch(0.12 0.01 250);
+  --surface-card: oklch(0.15 0.01 250);
+  --surface-hover: oklch(0.18 0.01 250);
+  --surface-active: oklch(0.21 0.01 250);
+
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  
+  --card: oklch(0.15 0.01 250);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  
+  --popover: oklch(0.15 0.01 250);
   --popover-foreground: oklch(0.985 0 0);
+  
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  
+  --secondary: oklch(0.2 0.02 250);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
+  
+  --muted: oklch(0.2 0.02 250);
   --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  
+  --accent: oklch(0.2 0.02 250);
   --accent-foreground: oklch(0.985 0 0);
+  
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
+  
+  --border: oklch(1 0 0 / 12%);
+  --border-subtle: oklch(1 0 0 / 8%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
+  
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
+  
+  --sidebar: oklch(0.15 0.01 250);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -116,6 +181,16 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
   }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display text-foreground;
+  }
+}
+
+@utility font-display {
+  font-family: var(--font-display);
+}
+@utility font-sans {
+  font-family: var(--font-sans);
 }

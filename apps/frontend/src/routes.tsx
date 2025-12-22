@@ -1,22 +1,26 @@
-import React from "react";
-import { createBrowserRouter } from "react-router-dom";
-import RootLayout from "./components/RootLayout";
-import App from "./App";
+import { createBrowserRouter, Outlet, RouterProvider, useMatches } from "react-router-dom";
+import { SidebarProvider, SidebarTrigger } from "@/ui/sidebar";
+// We'll assume a RootLayout exists or we define a simple one here for now.
+import RootLayout from "@/components/RootLayout"; 
+import InviteLandingPage from "@/pages/invite-landing/InviteLandingPage";
+import OrganizationsPage from "@/pages/organizations/OrganizationsPage";
+import OrganizationDetailPage from "@/pages/organizations/OrganizationDetailPage";
+import ProjectVendors from "@/pages/projects/ProjectVendors";
+import { Suspense } from "react";
 
-// Lazy load pages for performance
-const OrganizationsPage = React.lazy(
-  () => import("@/pages/organizations/OrganizationsPage")
-);
-const OrganizationDetailPage = React.lazy(
-  () => import("@/pages/organizations/OrganizationDetailPage")
-);
-const InviteLandingPage = React.lazy(
-  () => import("@/pages/invite-landing/InviteLandingPage")
-);
+// Placeholder for Project Overview
+const ProjectOverview = () => <div className="p-8">Project Overview (Coming Soon)</div>;
+const ProjectList = () => <div className="p-8">All Projects List (Coming Soon)</div>;
 
-const LoadingFallback = () => (
-  <div className="p-6 text-center text-muted-foreground">Loading...</div>
-);
+// Layout for Project Section (Sidebar context etc)
+const ProjectLayout = () => {
+    return (
+        <div className="flex flex-col h-full w-full">
+             {/* We could put a secondary nav here if needed, or just rely on global sidebar */}
+             <Outlet />
+        </div>
+    )
+}
 
 export const router = createBrowserRouter([
   {
@@ -24,38 +28,43 @@ export const router = createBrowserRouter([
     element: <RootLayout />,
     children: [
       {
-        index: true,
-        element: <App />, // Existing Calendar Dashboard as home
+        path: "/",
+        element: <div>Dashboard Home</div>,
       },
       {
         path: "organizations",
-        children: [
-          {
-            index: true,
-            element: (
-              <React.Suspense fallback={<LoadingFallback />}>
-                <OrganizationsPage />
-              </React.Suspense>
-            ),
-          },
-          {
-            path: ":id",
-            element: (
-              <React.Suspense fallback={<LoadingFallback />}>
-                <OrganizationDetailPage />
-              </React.Suspense>
-            ),
-          },
-        ],
+        element: <OrganizationsPage />,
       },
+      {
+        path: "organizations/:orgId",
+        element: <OrganizationDetailPage />,
+      },
+      {
+        path: "projects",
+        element: <ProjectList />,
+      },
+      {
+        path: "projects/:projectId",
+        element: <ProjectLayout />,
+        children: [
+            {
+                path: "", // Default to overview
+                element: <ProjectOverview />
+            },
+            {
+                path: "vendors",
+                element: <ProjectVendors />
+            }
+        ]
+      }
     ],
   },
   {
     path: "/invite/:token",
-    element: (
-      <React.Suspense fallback={<LoadingFallback />}>
-        <InviteLandingPage />
-      </React.Suspense>
-    ),
+    element: <InviteLandingPage />,
   },
 ]);
+
+export function AppRoutes() {
+  return <RouterProvider router={router} />;
+}
