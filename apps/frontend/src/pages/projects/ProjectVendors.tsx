@@ -5,12 +5,19 @@ import { DataTable } from "@/components/data-table/DataTable";
 import { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/ui/button";
 import { InteractiveCell, StatusCell } from "@/components/data-table/Cells";
-import { Plus, Filter, LayoutGrid } from "lucide-react";
+import { Plus, Filter, LayoutGrid, Mail } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/ui/avatar";
 import { AddVendorDialog } from "./AddVendorDialog"; 
 import { cn } from "@/lib/utils";
 
 // --- Types ---
+interface LastMessage {
+    id: string;
+    content: string;
+    direction: string;
+    sentAt: string;
+}
+
 // Flattened structure for the table
 type VendorRow = {
     id: string; // ProjectSupplier ID
@@ -20,9 +27,25 @@ type VendorRow = {
     role: string;
     status: string;
     quoteAmount?: number;
-    lastComm?: string; // Placeholder for now
+    lastMessage?: LastMessage;
     contactMethods?: any[];
 };
+
+// Helper to format relative time
+function formatRelativeTime(dateString: string): string {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+}
 
 export default function ProjectVendors() {
     const { projectId } = useParams<{ projectId: string }>();
@@ -33,16 +56,23 @@ export default function ProjectVendors() {
     // Derived Data
     const vendors = useMemo<VendorRow[]>(() => {
         if (!project?.suppliers) return [];
-        return project.suppliers.map(ps => ({
-            id: ps.id,
-            supplierId: ps.supplierId,
-            name: ps.supplier?.name || "Unknown",
-            category: ps.supplier?.category || "Uncategorized",
-            role: ps.role,
-            status: ps.status,
-            quoteAmount: ps.quoteAmount,
-            contactMethods: ps.supplier?.contactMethods
-        }));
+        return project.suppliers.map(ps => {
+            // Get the last message from the supplier (if any)
+            const supplierData = ps.supplier as any; // Type assertion for messages field
+            const lastMessage = supplierData?.messages?.[0] as LastMessage | undefined;
+            
+            return {
+                id: ps.id,
+                supplierId: ps.supplierId,
+                name: ps.supplier?.name || "Unknown",
+                category: ps.supplier?.category || "Uncategorized",
+                role: ps.role,
+                status: ps.status,
+                quoteAmount: ps.quoteAmount,
+                lastMessage,
+                contactMethods: ps.supplier?.contactMethods
+            };
+        });
     }, [project]);
 
     const filteredVendors = useMemo(() => {
@@ -91,7 +121,31 @@ export default function ProjectVendors() {
         {
             accessorKey: "lastCommunication",
             header: "Last Communication",
-            cell: () => <InteractiveCell className="text-muted-foreground">No recent messages</InteractiveCell>
+            cell: ({ row }) => {
+                const msg = row.original.lastMessage;
+                if (!msg) {
+                    return <InteractiveCell className="text-muted-foreground">No messages yet</InteractiveCell>;
+                }
+                
+                const preview = msg.content.length > 50 
+                    ? msg.content.substring(0, 50) + "..." 
+                    : msg.content;
+                const timeAgo = formatRelativeTime(msg.sentAt);
+                const isInbound = msg.direction === "INBOUND";
+                
+                return (
+                    <InteractiveCell className="text-foreground">
+                        <div className="flex items-center gap-2">
+                            <Mail className={cn(
+                                "h-3.5 w-3.5 flex-shrink-0",
+                                isInbound ? "text-blue-500" : "text-emerald-500"
+                            )} />
+                            <span className="truncate text-sm">{preview}</span>
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">{timeAgo}</span>
+                        </div>
+                    </InteractiveCell>
+                );
+            }
         }
     ];
 

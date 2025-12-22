@@ -56,14 +56,23 @@ const app = new Hono()
         suppliers: {
           include: {
             supplier: {
-              include: { contactMethods: true }
+              include: { 
+                contactMethods: true,
+                // Include the supplier's most recent message
+                messages: {
+                  take: 1,
+                  orderBy: { sentAt: "desc" },
+                  select: {
+                    id: true,
+                    content: true,
+                    direction: true,
+                    sentAt: true,
+                  }
+                }
+              }
             }
           }
         },
-        messages: {
-          take: 5,
-          orderBy: { sentAt: "desc" }
-        }
       },
     });
 
@@ -147,4 +156,3 @@ const app = new Hono()
   });
 
 export default app;
-
