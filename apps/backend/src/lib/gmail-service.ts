@@ -47,14 +47,30 @@ export async function fetchGmailHistory(
 export async function processEmailsWithToken(
   accessToken: string,
   startHistoryId: string,
-  userId: string
+  userId: string,
+  opts?: { debug?: boolean }
 ) {
+  const debug = Boolean(opts?.debug);
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: accessToken });
   const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
+  if (debug) {
+    console.log("[gmail-service] startHistoryId:", startHistoryId);
+  }
   const newMessages = await fetchGmailHistory(gmail, startHistoryId);
   let processedCount = 0;
+
+  if (debug) {
+    console.log("[gmail-service] history returned message count:", newMessages.length);
+  }
+
+  const extractEmail = (input: string): string | null => {
+    if (!input) return null;
+    // Handles: Name <email@x.com>, just email@x.com, quoted forms, etc.
+    const match = input.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return match ? match[0] : null;
+  };
 
   for (const msg of newMessages) {
     if (!msg.id) continue;
@@ -63,7 +79,10 @@ export async function processEmailsWithToken(
     const existing = await prisma.message.findFirst({
       where: { externalId: msg.id },
     });
-    if (existing) continue;
+    if (existing) {
+      if (debug) console.log("[gmail-service] skipping existing message:", msg.id);
+      continue;
+    }
 
     try {
       const emailData = await gmail.users.messages.get({
@@ -74,22 +93,42 @@ export async function processEmailsWithToken(
 
       const headers = emailData.data.payload?.headers || [];
       const fromRaw = headers.find((h: any) => h.name === "From")?.value || "";
-      const fromEmail = fromRaw.match(/<(.+)>/)?.[1] || fromRaw;
+      const subject = headers.find((h: any) => h.name === "Subject")?.value || "";
+      const fromEmail = extractEmail(fromRaw) ?? fromRaw;
+      const normalizedFromEmail = fromEmail.trim().toLowerCase();
       const body = extractEmailBody(emailData.data.payload);
       const dateStr = headers.find((h: any) => h.name === "Date")?.value;
       const sentAt = dateStr ? new Date(dateStr) : new Date();
+
+      if (debug) {
+        console.log("[gmail-service] msg:", {
+          id: msg.id,
+          fromRaw,
+          fromEmail: normalizedFromEmail,
+          subject,
+          sentAt: sentAt.toISOString(),
+          bodyPreview: body.slice(0, 120),
+        });
+      }
 
       // Match Supplier
       const contactMethod = await prisma.contactMethod.findFirst({
         where: {
           type: "EMAIL",
-          value: fromEmail,
+          value: { equals: normalizedFromEmail, mode: "insensitive" },
           supplier: { userId: userId }, // Must belong to this user
         },
         include: { supplier: true },
       });
 
       if (contactMethod) {
+        if (debug) {
+          console.log("[gmail-service] matched supplier:", {
+            supplierId: contactMethod.supplierId,
+            supplierName: contactMethod.supplier?.name,
+            contactMethodId: contactMethod.id,
+          });
+        }
         // Create Message linked to Supplier
         await prisma.message.create({
           data: {
@@ -102,6 +141,11 @@ export async function processEmailsWithToken(
           },
         });
         processedCount++;
+      } else if (debug) {
+        console.log(
+          "[gmail-service] no ContactMethod match for fromEmail:",
+          normalizedFromEmail
+        );
       }
     } catch (err) {
       console.error(`Failed to process message ${msg.id}`, err);
