@@ -117,7 +117,7 @@ Respond with ONLY a valid JSON array.`;
         { role: "user", content: `Classify these ${candidates.length} contacts:\n\n${inputList}` },
       ],
       temperature: 0.2,
-      max_tokens: 2000,
+      max_completion_tokens: 2000, // Changed from max_tokens for newer models (gpt-4o, gpt-5, etc.)
     }),
   });
 

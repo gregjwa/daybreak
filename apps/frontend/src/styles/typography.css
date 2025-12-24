@@ -1,0 +1,54 @@
+/* Strict typography utilities (single source of truth for type scale) */
+
+@layer base {
+  h1 {
+    @apply text-2xl md:text-3xl font-semibold tracking-tight;
+  }
+
+  h2 {
+    @apply text-xl md:text-2xl font-semibold tracking-tight;
+  }
+
+  h3 {
+    @apply text-lg font-semibold tracking-tight;
+  }
+
+  h4 {
+    @apply text-base font-semibold tracking-tight;
+  }
+
+  p {
+    @apply text-sm leading-relaxed;
+  }
+
+  small {
+    @apply text-xs;
+  }
+
+  code,
+  pre {
+    @apply font-mono;
+  }
+}
+
+@utility text-ui {
+  @apply text-sm leading-snug;
+}
+
+@utility text-ui-muted {
+  @apply text-sm text-muted-foreground;
+}
+
+@utility text-caption {
+  @apply text-xs text-muted-foreground;
+}
+
+@utility text-title {
+  @apply text-lg font-semibold tracking-tight;
+}
+
+@utility text-subtitle {
+  @apply text-sm text-muted-foreground;
+}
+
+
