@@ -183,6 +183,87 @@ function useSubmitFeedback() {
 }
 
 // Components
+
+function RunTableRow({ 
+  run, 
+  onViewClick 
+}: { 
+  run: ExperimentRun; 
+  onViewClick: () => void;
+}) {
+  const submitFeedback = useSubmitFeedback();
+  
+  const handleQuickFeedback = async (isCorrect: boolean, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await submitFeedback.mutateAsync({ runId: run.id, isCorrect });
+    } catch (err) {
+      console.error("Feedback error:", err);
+    }
+  };
+
+  return (
+    <TableRow className="hover:bg-muted/50">
+      <TableCell className="font-mono text-xs">
+        {run.candidateEmail}
+      </TableCell>
+      <TableCell className="text-muted-foreground text-xs">
+        {run.candidateDomain}
+      </TableCell>
+      <TableCell className="text-xs">{run.latencyMs}ms</TableCell>
+      <TableCell className="text-xs">
+        ${run.cost.toFixed(4)}
+      </TableCell>
+      <TableCell>
+        {run.hasFeedback ? (
+          <div className="flex items-center gap-1">
+            {run.isCorrect ? (
+              <CheckCircle className="h-4 w-4 text-emerald-600" />
+            ) : (
+              <XCircle className="h-4 w-4 text-red-600" />
+            )}
+            <span className="text-xs text-muted-foreground">
+              {run.isCorrect ? "Correct" : "Wrong"}
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
+              onClick={(e) => handleQuickFeedback(true, e)}
+              disabled={submitFeedback.isPending}
+              title="Mark as correct"
+            >
+              <CheckCircle className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-red-600 hover:bg-red-50 hover:text-red-700"
+              onClick={(e) => handleQuickFeedback(false, e)}
+              disabled={submitFeedback.isPending}
+              title="Mark as incorrect"
+            >
+              <XCircle className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+      </TableCell>
+      <TableCell>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onViewClick}
+        >
+          View
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 function StatCard({
   icon: Icon,
   label,
@@ -554,19 +635,53 @@ export default function ExperimentsPage() {
                 />
               </div>
 
-              {/* Model Config */}
-              <section>
-                <h3 className="text-sm font-medium mb-2">Model Configuration</h3>
-                <div className="rounded border p-3 bg-muted/50 text-xs font-mono">
-                  {JSON.stringify(experimentDetail.experiment.modelConfig, null, 2)}
-                </div>
-              </section>
+              {/* Prompt & Config */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <section>
+                  <h3 className="text-sm font-medium mb-2">Prompt Version</h3>
+                  <div className="rounded border p-3 bg-muted/50">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge variant="outline">{experimentDetail.experiment.promptVersion}</Badge>
+                      {experimentDetail.experiment.isActive && (
+                        <Badge variant="secondary">Active</Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {experimentDetail.experiment.description || "No description"}
+                    </p>
+                  </div>
+                </section>
+                <section>
+                  <h3 className="text-sm font-medium mb-2">Model Configuration</h3>
+                  <div className="rounded border p-3 bg-muted/50 text-xs font-mono">
+                    {JSON.stringify(experimentDetail.experiment.modelConfig, null, 2)}
+                  </div>
+                </section>
+              </div>
+              
+              {/* View full prompt from first run if available */}
+              {experimentDetail.recentRuns.length > 0 && (
+                <details className="group">
+                  <summary className="text-sm font-medium cursor-pointer hover:text-primary">
+                    View System Prompt Used{" "}
+                    <CaretRight className="inline h-4 w-4 transition-transform group-open:rotate-90" />
+                  </summary>
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Click "View" on any run to see the exact prompt and response.
+                  </div>
+                </details>
+              )}
 
               {/* Runs Table */}
               <section>
-                <h3 className="text-sm font-medium mb-3">
-                  Recent Runs ({experimentDetail.recentRuns.length})
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-medium">
+                    Recent Runs ({experimentDetail.recentRuns.length})
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Note: Each row = 1 candidate result. Candidates are batched 8 per API call.
+                  </p>
+                </div>
                 <div className="rounded-lg border overflow-hidden">
                   <Table>
                     <TableHeader>
@@ -575,44 +690,17 @@ export default function ExperimentsPage() {
                         <TableHead>Domain</TableHead>
                         <TableHead>Latency</TableHead>
                         <TableHead>Cost</TableHead>
-                        <TableHead>Feedback</TableHead>
+                        <TableHead>Quick Feedback</TableHead>
                         <TableHead></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {experimentDetail.recentRuns.map((run) => (
-                        <TableRow key={run.id} className="cursor-pointer hover:bg-muted/50">
-                          <TableCell className="font-mono text-xs">
-                            {run.candidateEmail}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground text-xs">
-                            {run.candidateDomain}
-                          </TableCell>
-                          <TableCell className="text-xs">{run.latencyMs}ms</TableCell>
-                          <TableCell className="text-xs">
-                            ${run.cost.toFixed(4)}
-                          </TableCell>
-                          <TableCell>
-                            {run.hasFeedback ? (
-                              run.isCorrect ? (
-                                <CheckCircle className="h-4 w-4 text-emerald-600" />
-                              ) : (
-                                <XCircle className="h-4 w-4 text-red-600" />
-                              )
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setSelectedRunId(run.id)}
-                            >
-                              View
-                            </Button>
-                          </TableCell>
-                        </TableRow>
+                        <RunTableRow 
+                          key={run.id} 
+                          run={run} 
+                          onViewClick={() => setSelectedRunId(run.id)} 
+                        />
                       ))}
                     </TableBody>
                   </Table>

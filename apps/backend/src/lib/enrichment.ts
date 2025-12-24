@@ -60,7 +60,7 @@ interface BatchEnrichmentMetrics {
 // A/B TESTING INFRASTRUCTURE
 // ============================================================================
 
-const PROMPT_VERSION = "v2-with-email-context";
+const PROMPT_VERSION = "v3-direction-aware";
 
 /**
  * Get or create the active enrichment experiment
@@ -151,7 +151,7 @@ function calculateCost(model: string, inputTokens: number, outputTokens: number)
  * Build the system prompt for enrichment
  */
 function buildSystemPrompt(eventContext: string): string {
-  return `You classify email contacts for an event planner to identify potential suppliers/vendors.
+  return `You classify email contacts for an event planner to identify potential SUPPLIERS/VENDORS who provide services TO the user.
 
 USER'S EVENT TYPES: "${eventContext || "Various events (weddings, corporate, parties)"}"
 
@@ -162,39 +162,45 @@ You will receive contacts with:
 - Their email and domain
 - Snippets from actual emails exchanged (subject + body content)
 
-Based on this, determine for each contact:
-1. suggestedCompanyName: The business/company name (for personal domains like gmail.com, use the person's name or derive from context)
-2. suggestedContactName: The individual person's name if identifiable
-3. suggestedRole: Their role if apparent ("Owner", "Sales Rep", "Photographer", etc.)
-4. categories: From the list above - pick based on email content, not just domain
-5. primaryCategory: Main category if multiple apply
-6. confidence: 0-1 based on how clear the evidence is
-7. isRelevant: Is this a potential event supplier/vendor?
+CRITICAL: Determine WHO IS PROVIDING SERVICES TO WHOM:
+- A SUPPLIER is someone who provides services TO the user for events
+- Look for: quotes, invoices, pricing, availability, bookings, contracts
+- The email should show THEM offering services/products TO the user
 
-EMAIL CONTENT IS THE STRONGEST SIGNAL. Examples:
-- Email discussing "wedding photography packages" → Photography, high confidence
-- Email about "catering menu for 200 guests" → Catering, high confidence
-- Email saying "see you at the family BBQ" → Not relevant, personal contact
+Based on this, determine for each contact:
+1. suggestedCompanyName: The business/company name
+2. suggestedContactName: The individual person's name if identifiable
+3. suggestedRole: Their role ("Owner", "Sales Rep", "Photographer", etc.)
+4. categories: From the list above - ONLY if they clearly provide these services
+5. primaryCategory: Main category if multiple apply
+6. confidence: 0-1 based on how clear the supplier relationship is
+7. isRelevant: TRUE ONLY if this is someone who provides event services TO the user
+
+EXAMPLES - Mark isRelevant=TRUE:
+- Email: "Here's the quote for your wedding photography - $3500 for 8 hours" → Photography supplier
+- Email: "Confirming your venue booking for March 15th" → Venue supplier
+- Email: "The catering menu you requested for 200 guests" → Catering supplier
+
+EXAMPLES - Mark isRelevant=FALSE:
+- Email where USER is pitching THEIR business to someone → Investor/partner, NOT a supplier
+- Email: "Great to hear about your startup" → Investor/partner
+- Email: "Would love to discuss investment" → Investor
+- Email: "Let's catch up for coffee" → Personal contact
+- Email: "Your Amazon order has shipped" → E-commerce, not event supplier
+- Email: "Newsletter: 10 tips for..." → Newsletter/spam
+- Email: "Meeting notes from yesterday" → Colleague/internal
+- Email discussing fundraising, investment, startups → NOT a supplier
+- Email where user is describing what THEY are building → Networking/sales, NOT supplier
 
 RULES:
-- A freelancer using gmail.com CAN be a relevant supplier - judge by content, not domain
-- Mark isRelevant=false for: personal contacts, newsletters, spam, unrelated businesses
-- Mark isRelevant=true only if they could plausibly provide event services
-- Categories must be from the list above exactly
+1. Direction matters: The contact must be offering services TO the user, not the other way around
+2. Context matters: Just because an email mentions "studios" or "creative" doesn't make them a supplier
+3. Transactional signals: Look for quotes, pricing, bookings, availability, deliverables
+4. Be conservative: When in doubt, mark isRelevant=false. It's better to miss one than to include non-suppliers.
+5. Categories ONLY if they match the supplier's actual services
 
-Respond with ONLY a valid JSON array, one object per contact:
-[
-  {
-    "index": 1,
-    "suggestedCompanyName": "Acme Photography" | null,
-    "suggestedContactName": "John Smith" | null,
-    "suggestedRole": "Owner" | null,
-    "categories": ["Photography", "Videography"],
-    "primaryCategory": "Photography" | null,
-    "confidence": 0.85,
-    "isRelevant": true
-  }
-]`;
+Respond with ONLY a valid JSON array:
+[{"index": 1, "suggestedCompanyName": null, "suggestedContactName": null, "suggestedRole": null, "categories": [], "primaryCategory": null, "confidence": 0.0, "isRelevant": false}]`;
 }
 
 /**
