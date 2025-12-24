@@ -92,6 +92,8 @@ model User {
   gmailWatch          GmailWatch?
   backfillRuns        BackfillRun[]
   supplierCandidates  SupplierCandidate[]
+  emailThreads        EmailThread[]
+  statusConfigs       UserStatusConfig[]
 
   @@map("users")
 }
@@ -210,12 +212,16 @@ model Project {
   date        DateTime?
   budget      Decimal? @db.Decimal(10, 2)
   description String?
+  venue       String?
+  guestCount  Int?
   
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  suppliers ProjectSupplier[]
-  messages  Message[]
+  suppliers     ProjectSupplier[]
+  messages      Message[]
+  emailThreads  EmailThread[]   // Threads detected as related to this project
+  statusProposals StatusProposal[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -233,9 +239,15 @@ model ProjectSupplier {
   supplier       Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 
   role           String
-  status         String   @default("NEEDED")
+  statusSlug     String   @default("needed") // Refers to SupplierStatus.slug
   quoteAmount    Decimal? @db.Decimal(10, 2)
+  budgetAlloc    Decimal? @db.Decimal(10, 2) // Allocated budget for this vendor slot
   notes          String?
+  
+  // Status history for audit trail
+  statusHistory  Json?    // [{slug, changedAt, changedBy, reason}]
+  
+  statusProposals StatusProposal[]
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -244,27 +256,94 @@ model ProjectSupplier {
   @@map("project_suppliers")
 }
 
+// Email thread grouping for conversation context
+model EmailThread {
+  id              String   @id @default(cuid())
+  gmailThreadId   String   @unique
+  
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Thread-level metadata
+  subject         String?            // Original thread subject
+  participantEmails String[]         // All participants in thread
+  messageCount    Int      @default(0)
+  
+  // Thread-level context detection
+  detectedProjectId     String?
+  detectedProject       Project? @relation(fields: [detectedProjectId], references: [id])
+  detectedProjectConf   Float?       // Confidence in project detection
+  detectedSupplierIds   String[]     // Suppliers involved
+  
+  // Status progression tracking
+  statusHistory   Json?              // [{status, timestamp, messageId}]
+  currentStatus   String?            // Latest detected status slug
+  
+  // Analysis metadata
+  lastAnalyzedAt  DateTime?
+  analysisVersion String?            // Track prompt version for re-analysis
+  analysisJson    Json?              // Cached full analysis results
+  
+  messages        Message[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@map("email_threads")
+}
+
 model Message {
   id              String   @id @default(cuid())
   
-  content         String   @db.Text
-  direction       String   // "INBOUND", "OUTBOUND"
-  sentAt          DateTime @default(now())
-  externalId      String?  // External Message ID
+  // Gmail identifiers (crucial for threading)
+  gmailMessageId  String?  @unique
+  gmailThreadId   String?
   
-  // Links
+  // Thread relationship
+  threadId        String?
+  thread          EmailThread? @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  
+  // Core fields
+  content         String   @db.Text
+  contentClean    String?  @db.Text  // Stripped of signatures/quotes
+  subject         String?
+  direction       String   // "INBOUND", "OUTBOUND"
+  channel         String   @default("EMAIL") // "EMAIL", "WHATSAPP", etc.
+  sentAt          DateTime @default(now())
+  externalId      String?  // External Message ID (legacy)
+  
+  // Quoted content detection
+  hasQuotedContent Boolean @default(false)
+  quotedMessageId  String?  // Reference to message being replied to
+  
+  // Relationships
+  userId          String?
+  
   projectId       String?
   project         Project? @relation(fields: [projectId], references: [id])
+  projectLinkConfidence Float?  // 0-1, null = manual link
+  projectLinkMethod     String? // "THREAD_CONTEXT" | "MESSAGE_CONTENT" | "USER" | "AUTO"
   
   supplierId      String?
   supplier        Supplier? @relation(fields: [supplierId], references: [id])
   
   contactMethodId String?
   contactMethod   ContactMethod? @relation(fields: [contactMethodId], references: [id])
+  
+  // Status detection (per-message contribution)
+  detectedStatusSlug    String?  // What status this message suggests
+  statusConfidence      Float?   // Confidence in status detection
+  statusSignals         String[] // What signals were matched
+  
+  // Analysis cache
+  analysisJson    Json?
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  @@index([gmailThreadId])
+  @@index([userId])
   @@map("messages")
 }
 
@@ -278,6 +357,80 @@ model GmailWatch {
   updatedAt    DateTime @updatedAt
 
   @@map("gmail_watches")
+}
+
+// --- Supplier Status Pipeline ---
+
+model SupplierStatus {
+  id          String   @id @default(cuid())
+  slug        String   @unique  // "rfq-sent", "quote-received"
+  name        String            // "RFQ Sent", "Quote Received"
+  description String?
+  order       Int               // Pipeline ordering (1-10)
+  color       String?           // For UI badges, e.g. "#10B981"
+  isSystem    Boolean  @default(true)  // Predefined vs custom
+  
+  // Detection signals for AI/rule matching
+  inboundSignals   String[]  // Signals in messages FROM supplier
+  outboundSignals  String[]  // Signals in messages TO supplier
+  threadPatterns   String[]  // Thread-level patterns, e.g. "first outbound asking"
+  
+  userConfigs      UserStatusConfig[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("supplier_statuses")
+}
+
+model UserStatusConfig {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  statusId  String
+  status    SupplierStatus @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  isEnabled Boolean  @default(true)  // User can disable statuses they don't use
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, statusId])
+  @@map("user_status_configs")
+}
+
+model StatusProposal {
+  id              String   @id @default(cuid())
+  
+  projectSupplierId String
+  projectSupplier   ProjectSupplier @relation(fields: [projectSupplierId], references: [id], onDelete: Cascade)
+  
+  // Optional link to project for easier querying
+  projectId       String?
+  project         Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  // Which message triggered this proposal
+  messageId       String?
+  threadId        String?
+  
+  fromStatus      String?  // Current status slug (null if first detection)
+  toStatus        String   // Proposed status slug
+  confidence      Float    // 0-1
+  
+  // Evidence
+  matchedSignals  String[]
+  reasoning       String?  // AI-generated explanation
+  
+  // Resolution
+  status          String   @default("PENDING")  // PENDING, ACCEPTED, REJECTED, EXPIRED
+  resolvedAt      DateTime?
+  resolvedBy      String?  // userId
+  
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime // Auto-expire after 7 days
+
+  @@index([projectSupplierId])
+  @@index([status])
+  @@map("status_proposals")
 }
 
 // --- Inbox Backfill Models ---

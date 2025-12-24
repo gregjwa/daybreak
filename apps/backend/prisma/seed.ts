@@ -2,6 +2,110 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+// Supplier status pipeline
+const SUPPLIER_STATUSES = [
+  {
+    slug: "needed",
+    name: "Needed",
+    description: "Vendor is needed for this category but not yet contacted",
+    order: 1,
+    color: "#6B7280", // gray-500
+    inboundSignals: [],
+    outboundSignals: [],
+    threadPatterns: [],
+  },
+  {
+    slug: "shortlisted",
+    name: "Shortlisted",
+    description: "Vendor has been identified as a potential option",
+    order: 2,
+    color: "#8B5CF6", // violet-500
+    inboundSignals: [],
+    outboundSignals: [],
+    threadPatterns: [],
+  },
+  {
+    slug: "rfq-sent",
+    name: "RFQ Sent",
+    description: "Request for quote has been sent to the vendor",
+    order: 3,
+    color: "#3B82F6", // blue-500
+    inboundSignals: [],
+    outboundSignals: ["quote", "pricing", "proposal", "rates", "availability", "packages", "services", "what do you charge"],
+    threadPatterns: ["first outbound asking about services or pricing"],
+  },
+  {
+    slug: "quote-received",
+    name: "Quote Received",
+    description: "Vendor has provided a quote or pricing information",
+    order: 4,
+    color: "#06B6D4", // cyan-500
+    inboundSignals: ["quote", "pricing", "$", "per hour", "package", "rate", "cost", "price", "total", "estimate", "proposal attached", "here's what we charge"],
+    outboundSignals: [],
+    threadPatterns: ["first inbound with pricing after outbound inquiry"],
+  },
+  {
+    slug: "negotiating",
+    name: "Negotiating",
+    description: "Actively negotiating terms, pricing, or details",
+    order: 5,
+    color: "#F59E0B", // amber-500
+    inboundSignals: ["counter", "discount", "best price", "we can do", "final offer", "adjusted"],
+    outboundSignals: ["budget is", "can you do", "lower", "negotiate", "flexibility", "discount", "better rate"],
+    threadPatterns: ["back-and-forth about pricing or terms"],
+  },
+  {
+    slug: "confirmed",
+    name: "Confirmed",
+    description: "Vendor is confirmed for the event",
+    order: 6,
+    color: "#10B981", // emerald-500
+    inboundSignals: ["confirm", "booked", "reserved", "looking forward", "see you on", "you're all set"],
+    outboundSignals: ["confirm", "proceed", "go ahead", "let's do it", "book", "reserve", "we'd like to move forward"],
+    threadPatterns: ["agreement reached on terms"],
+  },
+  {
+    slug: "contracted",
+    name: "Contracted",
+    description: "Contract has been signed",
+    order: 7,
+    color: "#059669", // emerald-600
+    inboundSignals: ["contract", "agreement attached", "please sign", "docusign", "signed copy", "countersigned"],
+    outboundSignals: ["signed", "contract attached", "returning the signed", "executed"],
+    threadPatterns: ["contract document exchanged"],
+  },
+  {
+    slug: "deposit-paid",
+    name: "Deposit Paid",
+    description: "Initial deposit or retainer has been paid",
+    order: 8,
+    color: "#7C3AED", // violet-600
+    inboundSignals: ["deposit received", "payment received", "thank you for your payment", "retainer received"],
+    outboundSignals: ["deposit sent", "paid deposit", "payment sent", "transferred", "wired"],
+    threadPatterns: ["payment confirmation"],
+  },
+  {
+    slug: "fulfilled",
+    name: "Fulfilled",
+    description: "Vendor has delivered their services",
+    order: 9,
+    color: "#14B8A6", // teal-500
+    inboundSignals: ["delivered", "completed", "thank you for having us", "hope you enjoyed", "great event"],
+    outboundSignals: ["thank you", "great job", "wonderful service", "appreciate"],
+    threadPatterns: ["post-event communication"],
+  },
+  {
+    slug: "paid-in-full",
+    name: "Paid in Full",
+    description: "Final payment has been made",
+    order: 10,
+    color: "#22C55E", // green-500
+    inboundSignals: ["final payment received", "paid in full", "balance cleared", "all settled"],
+    outboundSignals: ["final payment", "remaining balance", "full payment sent"],
+    threadPatterns: ["final payment confirmation"],
+  },
+];
+
 // Supplier category taxonomy
 const SYSTEM_CATEGORIES = [
   // Core Event Services
@@ -64,7 +168,41 @@ const SYSTEM_CATEGORIES = [
 ];
 
 async function main() {
-  console.log("Seeding system categories...");
+  // Seed supplier statuses
+  console.log("Seeding supplier statuses...");
+  
+  for (const status of SUPPLIER_STATUSES) {
+    await prisma.supplierStatus.upsert({
+      where: { slug: status.slug },
+      update: {
+        name: status.name,
+        description: status.description,
+        order: status.order,
+        color: status.color,
+        inboundSignals: status.inboundSignals,
+        outboundSignals: status.outboundSignals,
+        threadPatterns: status.threadPatterns,
+        isSystem: true,
+      },
+      create: {
+        slug: status.slug,
+        name: status.name,
+        description: status.description,
+        order: status.order,
+        color: status.color,
+        inboundSignals: status.inboundSignals,
+        outboundSignals: status.outboundSignals,
+        threadPatterns: status.threadPatterns,
+        isSystem: true,
+      },
+    });
+    console.log(`  ✓ ${status.name} (order: ${status.order})`);
+  }
+  
+  console.log(`\nSeeded ${SUPPLIER_STATUSES.length} supplier statuses.`);
+
+  // Seed supplier categories
+  console.log("\nSeeding system categories...");
 
   for (const category of SYSTEM_CATEGORIES) {
     await prisma.supplierCategory.upsert({

@@ -6,6 +6,7 @@ import { clerkMiddleware } from "@hono/clerk-auth";
 import { createClerkClient } from "@clerk/backend";
 import { prisma } from "./db";
 import { processEmailsWithToken } from "./lib/gmail-service";
+import { processGmailHistoryWithThreads } from "./lib/thread-processor";
 
 // Import routers
 import organizationsRouter from "./routes/organizations";
@@ -18,6 +19,9 @@ import projectsRouter from "./routes/projects";
 import messagesRouter from "./routes/messages";
 import gmailRouter from "./routes/gmail";
 import { enrichmentRouter } from "./routes/enrichment";
+import proposalsRouter from "./routes/proposals";
+import statusesRouter from "./routes/statuses";
+import importRouter from "./routes/import";
 
 function emailDebugEnabled() {
   return (
@@ -54,6 +58,9 @@ const app = new Hono()
   .route("/api/messages", messagesRouter)
   .route("/api/emails", gmailRouter)
   .route("/api/enrichment", enrichmentRouter)
+  .route("/api/proposals", proposalsRouter)
+  .route("/api/statuses", statusesRouter)
+  .route("/api/import", importRouter)
 
   // Gmail Webhooks (No Auth Middleware needed, but keeping simple structure)
   // Note: Hono middleware runs on all routes by default if specific path not excluded?
@@ -121,10 +128,12 @@ const app = new Hono()
                      if (debug) {
                        console.log("[gmail-webhook] processing with startHistoryId:", watch.historyId);
                      }
-                     const result = await processEmailsWithToken(
+                     // Use thread-aware processing
+                     const result = await processGmailHistoryWithThreads(
                        token,
                        watch.historyId,
                        watch.user.id,
+                       emailAddress,
                        { debug }
                      );
                      if (debug) {

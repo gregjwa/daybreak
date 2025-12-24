@@ -15,6 +15,13 @@ const SupplierDetailPage = lazy(() => import("@/pages/suppliers/SupplierDetailPa
 // Lazy load inbox pages
 const InboxSettingsPage = lazy(() => import("@/pages/inbox/InboxSettingsPage"));
 const InboxImportPage = lazy(() => import("@/pages/inbox/InboxImportPage"));
+const PendingActionsPage = lazy(() => import("@/pages/inbox/PendingActionsPage"));
+
+// Lazy load settings pages
+const StatusConfigPage = lazy(() => import("@/pages/settings/StatusConfigPage"));
+
+// Lazy load project pages
+const ImportProjectPage = lazy(() => import("@/pages/projects/ImportProjectPage"));
 
 // Lazy load dev pages
 const DevLayout = lazy(() => import("@/pages/dev/DevLayout"));
@@ -108,6 +115,30 @@ export const router = createBrowserRouter([
         element: (
           <Suspense fallback={<PageLoader />}>
             <InboxImportPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "inbox/pending",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <PendingActionsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "settings/statuses",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <StatusConfigPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "projects/import",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <ImportProjectPage />
           </Suspense>
         ),
       },

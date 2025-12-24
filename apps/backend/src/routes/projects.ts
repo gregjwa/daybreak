@@ -15,8 +15,9 @@ const createProjectSchema = z.object({
 const addProjectSupplierSchema = z.object({
   supplierId: z.string().cuid(),
   role: z.string().min(1), // e.g., "Florist"
-  status: z.string().default("NEEDED"),
+  statusSlug: z.string().default("needed"), // References SupplierStatus.slug
   quoteAmount: z.number().optional(),
+  budgetAlloc: z.number().optional(), // Allocated budget for this vendor slot
   notes: z.string().optional(),
 });
 
@@ -153,8 +154,9 @@ const app = new Hono()
         projectId,
         supplierId: data.supplierId,
         role: data.role,
-        status: data.status,
+        statusSlug: data.statusSlug,
         quoteAmount: data.quoteAmount,
+        budgetAlloc: data.budgetAlloc,
         notes: data.notes,
       },
     });
