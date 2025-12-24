@@ -1,17 +1,78 @@
 import { google } from "googleapis";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
+import { extractMeaningfulContent, cleanSubject, type EmailContext } from "./email-utils";
 
-// Extract email from header format: "Name <email@domain.com>" or just "email@domain.com"
+// ============================================================================
+// PERSONAL DOMAIN DETECTION
+// ============================================================================
+
+const PERSONAL_DOMAINS = new Set([
+  // Major providers
+  "gmail.com",
+  "googlemail.com",
+  "yahoo.com",
+  "yahoo.co.uk",
+  "ymail.com",
+  "hotmail.com",
+  "hotmail.co.uk",
+  "outlook.com",
+  "outlook.co.uk",
+  "live.com",
+  "live.co.uk",
+  "msn.com",
+  // Apple
+  "icloud.com",
+  "me.com",
+  "mac.com",
+  // Others
+  "aol.com",
+  "protonmail.com",
+  "proton.me",
+  "mail.com",
+  "zoho.com",
+  "fastmail.com",
+  "tutanota.com",
+  // Regional
+  "gmx.com",
+  "gmx.de",
+  "web.de",
+  "orange.fr",
+  "wanadoo.fr",
+  "free.fr",
+  "btinternet.com",
+  "sky.com",
+  "virginmedia.com",
+  "ntlworld.com",
+]);
+
+/**
+ * Check if a domain is a personal email provider
+ * Personal domains mean each email = standalone supplier (no grouping)
+ * Business domains get grouped under one supplier
+ */
+export function isPersonalDomain(domain: string): boolean {
+  return PERSONAL_DOMAINS.has(domain.toLowerCase());
+}
+
+// ============================================================================
+// EMAIL PARSING UTILITIES
+// ============================================================================
+
+/**
+ * Extract email address from header format: "Name <email@domain.com>" or just "email@domain.com"
+ */
 function extractEmail(input: string): string | null {
   if (!input) return null;
   const match = input.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   return match ? match[0].toLowerCase().trim() : null;
 }
 
-// Extract display name from header format: "Name <email@domain.com>"
+/**
+ * Extract display name from header format: "Name <email@domain.com>"
+ */
 function extractDisplayName(input: string): string | null {
   if (!input) return null;
-  // Try: "Name <email>" format
   const match = input.match(/^([^<]+)<[^>]+>$/);
   if (match) {
     const name = match[1].trim().replace(/^["']|["']$/g, "");
@@ -20,11 +81,67 @@ function extractDisplayName(input: string): string | null {
   return null;
 }
 
-// Extract domain from email
+/**
+ * Extract domain from email address
+ */
 function extractDomain(email: string): string {
   const parts = email.split("@");
   return parts.length === 2 ? parts[1].toLowerCase() : "";
 }
+
+/**
+ * Decode base64url encoded content
+ */
+function decodeBase64Url(data: string): string {
+  const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
+  try {
+    return Buffer.from(base64, "base64").toString("utf-8");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Extract email body from Gmail message payload
+ */
+function extractEmailBody(payload: {
+  body?: { data?: string };
+  parts?: Array<{ mimeType?: string; body?: { data?: string }; parts?: unknown[] }>;
+}): string {
+  // Try direct body first
+  if (payload.body?.data) {
+    return decodeBase64Url(payload.body.data);
+  }
+
+  // Look through parts for text/plain or text/html
+  if (payload.parts) {
+    // Prefer text/plain
+    for (const part of payload.parts) {
+      if (part.mimeType === "text/plain" && part.body?.data) {
+        return decodeBase64Url(part.body.data);
+      }
+    }
+    // Fall back to text/html
+    for (const part of payload.parts) {
+      if (part.mimeType === "text/html" && part.body?.data) {
+        return decodeBase64Url(part.body.data);
+      }
+    }
+    // Check nested parts (multipart/alternative inside multipart/mixed)
+    for (const part of payload.parts) {
+      if (part.parts) {
+        const nested = extractEmailBody(part as typeof payload);
+        if (nested) return nested;
+      }
+    }
+  }
+
+  return "";
+}
+
+// ============================================================================
+// BACKFILL PROCESSING
+// ============================================================================
 
 interface BackfillTickResult {
   done: boolean;
@@ -40,18 +157,23 @@ interface BackfillTickResult {
   };
 }
 
+// In-memory accumulator for email contexts during a backfill run
+// Maps userId:email -> EmailContext[]
+const emailContextAccumulator = new Map<string, EmailContext[]>();
+
 /**
- * Process one "tick" of the backfill run - fetches one page of Gmail messages
- * and extracts recipients as SupplierCandidates.
- * Note: We include ALL recipients (including gmail.com, etc.) because freelancers use personal emails.
- * AI will filter based on relevance to user's event context.
+ * Process one "tick" of the backfill run
+ * - Fetches one page of Gmail messages
+ * - Extracts recipients as SupplierCandidates
+ * - Fetches full email body and extracts meaningful content
+ * - Stores email context for AI enrichment
  */
 export async function processBackfillTick(
   accessToken: string,
   runId: string,
   opts?: { maxMessagesPerTick?: number }
 ): Promise<BackfillTickResult> {
-  const maxMessages = opts?.maxMessagesPerTick || 50;
+  const maxMessages = opts?.maxMessagesPerTick || 30; // Reduced from 50 since we fetch full messages
 
   // Get current run
   const run = await prisma.backfillRun.findUnique({ where: { id: runId } });
@@ -109,12 +231,11 @@ export async function processBackfillTick(
       scannedThisTick++;
 
       try {
-        // Fetch message metadata only (faster)
+        // Fetch FULL message (not just metadata) to get body
         const msgData = await gmail.users.messages.get({
           userId: "me",
           id: msgRef.id,
-          format: "metadata",
-          metadataHeaders: ["To", "Cc", "Bcc", "Subject", "Date"],
+          format: "full",
         });
 
         const headers = msgData.data.payload?.headers || [];
@@ -125,9 +246,13 @@ export async function processBackfillTick(
         const dateHeader = headers.find((h) => h.name === "Date")?.value;
         const sentAt = dateHeader ? new Date(dateHeader) : new Date();
 
+        // Extract email body
+        const rawBody = msgData.data.payload ? extractEmailBody(msgData.data.payload as Parameters<typeof extractEmailBody>[0]) : "";
+        const cleanedContent = extractMeaningfulContent(rawBody, 400);
+        const cleanedSubject = cleanSubject(subjectHeader);
+
         // Parse all recipients
         const allRecipients = [toHeader, ccHeader, bccHeader].join(", ");
-        // Split by comma, handling quoted names
         const recipientParts = allRecipients.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
 
         for (const part of recipientParts) {
@@ -147,6 +272,23 @@ export async function processBackfillTick(
           discoveredThisTick++;
 
           const displayName = extractDisplayName(trimmed);
+          const accumulatorKey = `${run.userId}:${email}`;
+
+          // Build email context entry
+          const emailContext: EmailContext = {
+            subject: cleanedSubject,
+            content: cleanedContent,
+            date: sentAt.toISOString(),
+          };
+
+          // Accumulate email contexts (up to 5 per contact)
+          const existing = emailContextAccumulator.get(accumulatorKey) || [];
+          existing.push(emailContext);
+          // Keep only the 5 most recent
+          const sorted = existing
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, 5);
+          emailContextAccumulator.set(accumulatorKey, sorted);
 
           // Upsert SupplierCandidate
           try {
@@ -167,17 +309,17 @@ export async function processBackfillTick(
                 messageCount: 1,
                 firstSeenAt: sentAt,
                 lastSeenAt: sentAt,
+                emailContextJson: sorted as unknown as Prisma.InputJsonValue,
               },
               update: {
                 messageCount: { increment: 1 },
                 lastSeenAt: sentAt,
-                // Update displayName if we have one and existing doesn't
-                ...(displayName && { displayName }),
+                displayName: displayName || undefined,
+                emailContextJson: sorted as unknown as Prisma.InputJsonValue,
               },
             });
             createdThisTick++;
           } catch (upsertErr) {
-            // Ignore duplicate key errors (race condition)
             console.error("Upsert error:", upsertErr);
             errorsThisTick++;
           }
@@ -189,6 +331,7 @@ export async function processBackfillTick(
     }
 
     // Update run progress
+    const isComplete = nextPageToken === null;
     const updatedRun = await prisma.backfillRun.update({
       where: { id: runId },
       data: {
@@ -197,16 +340,24 @@ export async function processBackfillTick(
         discoveredContacts: { increment: discoveredThisTick },
         createdCandidates: { increment: createdThisTick },
         errorsCount: { increment: errorsThisTick },
-        // Mark completed if no more pages
-        ...(nextPageToken === null && {
+        ...(isComplete && {
           status: "COMPLETED",
           completedAt: new Date(),
         }),
       },
     });
 
+    // Clear accumulator when done
+    if (isComplete) {
+      for (const key of emailContextAccumulator.keys()) {
+        if (key.startsWith(`${run.userId}:`)) {
+          emailContextAccumulator.delete(key);
+        }
+      }
+    }
+
     return {
-      done: nextPageToken === null,
+      done: isComplete,
       scannedThisTick,
       discoveredThisTick,
       createdThisTick,
@@ -278,11 +429,9 @@ export async function getBackfillRunStatus(runId: string) {
     discoveredContacts: run.discoveredContacts,
     createdCandidates: run.createdCandidates,
     errorsCount: run.errorsCount,
-    // Enrichment phase
     enrichmentStatus: run.enrichmentStatus,
     enrichedCount: run.enrichedCount,
     autoImportedCount: run.autoImportedCount,
-    // Timestamps
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     hasMorePages: run.nextPageToken !== null,
@@ -299,4 +448,5 @@ export async function cancelBackfillRun(runId: string) {
   });
 }
 
-
+// Re-export for use in enrichment
+export { extractDomain, isPersonalDomain as checkPersonalDomain };

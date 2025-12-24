@@ -61,7 +61,10 @@ const app = new Hono()
                   include: { category: true },
                   orderBy: { isPrimary: "desc" },
                 },
-                contactMethods: true,
+                contacts: {
+                  include: { contactMethods: true },
+                  orderBy: { isPrimary: "desc" },
+                },
                 // Include the supplier's most recent message
                 messages: {
                   take: 1,

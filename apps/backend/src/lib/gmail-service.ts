@@ -111,21 +111,28 @@ export async function processEmailsWithToken(
         });
       }
 
-      // Match Supplier
+      // Match Supplier via ContactMethod -> SupplierContact -> Supplier
       const contactMethod = await prisma.contactMethod.findFirst({
         where: {
           type: "EMAIL",
           value: { equals: normalizedFromEmail, mode: "insensitive" },
-          supplier: { userId: userId }, // Must belong to this user
+          contact: { 
+            supplier: { userId: userId } // Must belong to this user
+          },
         },
-        include: { supplier: true },
+        include: { 
+          contact: {
+            include: { supplier: true }
+          }
+        },
       });
 
-      if (contactMethod) {
+      if (contactMethod?.contact?.supplier) {
+        const supplier = contactMethod.contact.supplier;
         if (debug) {
           console.log("[gmail-service] matched supplier:", {
-            supplierId: contactMethod.supplierId,
-            supplierName: contactMethod.supplier?.name,
+            supplierId: supplier.id,
+            supplierName: supplier.name,
             contactMethodId: contactMethod.id,
           });
         }
@@ -137,7 +144,7 @@ export async function processEmailsWithToken(
             externalId: msg.id,
             sentAt,
             contactMethodId: contactMethod.id,
-            supplierId: contactMethod.supplierId,
+            supplierId: supplier.id,
           },
         });
         processedCount++;

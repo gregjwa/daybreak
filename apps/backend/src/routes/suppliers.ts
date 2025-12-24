@@ -4,28 +4,51 @@ import { prisma } from "../db";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 
+// ============================================================================
+// SCHEMAS
+// ============================================================================
+
 const createSupplierSchema = z.object({
   name: z.string().min(1),
-  categorySlugs: z.array(z.string()).optional(), // Category slugs to link
-  primaryCategory: z.string().optional(), // Primary category slug
+  domain: z.string().optional(),
+  isPersonalDomain: z.boolean().default(false),
+  categorySlugs: z.array(z.string()).optional(),
+  primaryCategory: z.string().optional(),
   notes: z.string().optional(),
-  email: z.string().email().optional(), // Initial contact method
-  phone: z.string().optional(), // Initial contact method
+  // Initial contact (optional)
+  contact: z.object({
+    name: z.string().min(1),
+    email: z.string().email(),
+    role: z.string().optional(),
+  }).optional(),
 });
 
 const updateSupplierSchema = z.object({
   name: z.string().min(1).optional(),
+  notes: z.string().optional(),
   categorySlugs: z.array(z.string()).optional(),
   primaryCategory: z.string().optional(),
-  notes: z.string().optional(),
+});
+
+const addContactSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+  role: z.string().optional(),
+  isPrimary: z.boolean().default(false),
+  phone: z.string().optional(),
 });
 
 const addContactMethodSchema = z.object({
+  contactId: z.string(),
   type: z.enum(["EMAIL", "PHONE", "WHATSAPP", "OTHER"]),
   value: z.string().min(1),
   label: z.string().optional(),
   isPrimary: z.boolean().default(false),
 });
+
+// ============================================================================
+// ROUTES
+// ============================================================================
 
 const app = new Hono()
   // GET /api/suppliers - List all suppliers for the user
@@ -38,7 +61,7 @@ const app = new Hono()
     });
 
     if (!user) {
-      return c.json([]); // No user record = no suppliers
+      return c.json([]);
     }
 
     const suppliers = await prisma.supplier.findMany({
@@ -48,7 +71,12 @@ const app = new Hono()
           include: { category: true },
           orderBy: { isPrimary: "desc" },
         },
-        contactMethods: true,
+        contacts: {
+          include: {
+            contactMethods: true,
+          },
+          orderBy: { isPrimary: "desc" },
+        },
         _count: { select: { projectSuppliers: true, messages: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -57,7 +85,7 @@ const app = new Hono()
     return c.json(suppliers);
   })
 
-  // GET /api/suppliers/:id - Get supplier detail with projects + messages
+  // GET /api/suppliers/:id - Get supplier detail with contacts, projects, and messages
   .get("/:id", async (c) => {
     const auth = getAuth(c);
     const supplierId = c.req.param("id");
@@ -77,7 +105,12 @@ const app = new Hono()
           include: { category: true },
           orderBy: { isPrimary: "desc" },
         },
-        contactMethods: true,
+        contacts: {
+          include: {
+            contactMethods: true,
+          },
+          orderBy: { isPrimary: "desc" },
+        },
         projectSuppliers: {
           include: {
             project: {
@@ -126,7 +159,6 @@ const app = new Hono()
     });
 
     if (!user) {
-      // Fetch user details from Clerk to get email
       const clerkClient = c.get("clerk");
       const clerkUser = await clerkClient.users.getUser(auth.userId);
       const email = clerkUser.emailAddresses[0]?.emailAddress;
@@ -147,16 +179,35 @@ const app = new Hono()
     const supplier = await prisma.supplier.create({
       data: {
         name: data.name,
+        domain: data.domain,
+        isPersonalDomain: data.isPersonalDomain,
         notes: data.notes,
         userId: user.id,
-        contactMethods: {
-          create: [
-            ...(data.email ? [{ type: "EMAIL", value: data.email, isPrimary: true }] : []),
-            ...(data.phone ? [{ type: "PHONE", value: data.phone, isPrimary: !data.email }] : []),
-          ],
-        },
       },
     });
+
+    // Create initial contact if provided
+    if (data.contact) {
+      const contact = await prisma.supplierContact.create({
+        data: {
+          supplierId: supplier.id,
+          name: data.contact.name,
+          email: data.contact.email,
+          role: data.contact.role,
+          isPrimary: true,
+        },
+      });
+
+      // Create email contact method
+      await prisma.contactMethod.create({
+        data: {
+          contactId: contact.id,
+          type: "EMAIL",
+          value: data.contact.email,
+          isPrimary: true,
+        },
+      });
+    }
 
     // Link categories
     const categorySlugs = data.categorySlugs || [];
@@ -173,12 +224,12 @@ const app = new Hono()
       }
     }
 
-    // Fetch with categories
+    // Fetch with all relations
     const result = await prisma.supplier.findUnique({
       where: { id: supplier.id },
       include: {
         categories: { include: { category: true } },
-        contactMethods: true,
+        contacts: { include: { contactMethods: true } },
       },
     });
 
@@ -195,7 +246,6 @@ const app = new Hono()
     const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
     if (!user) return c.json({ error: "User not found" }, 404);
 
-    // Verify ownership
     const existing = await prisma.supplier.findUnique({ where: { id: supplierId } });
     if (!existing || existing.userId !== user.id) {
       return c.json({ error: "Supplier not found" }, 404);
@@ -203,7 +253,6 @@ const app = new Hono()
 
     const data = c.req.valid("json");
 
-    // Update basic fields
     await prisma.supplier.update({
       where: { id: supplierId },
       data: {
@@ -214,12 +263,10 @@ const app = new Hono()
 
     // Update categories if provided
     if (data.categorySlugs !== undefined) {
-      // Remove existing category links
       await prisma.supplierToCategory.deleteMany({
         where: { supplierId },
       });
 
-      // Add new category links
       for (const slug of data.categorySlugs) {
         const category = await prisma.supplierCategory.findUnique({ where: { slug } });
         if (category) {
@@ -234,20 +281,19 @@ const app = new Hono()
       }
     }
 
-    // Fetch updated supplier
     const supplier = await prisma.supplier.findUnique({
       where: { id: supplierId },
       include: {
         categories: { include: { category: true } },
-        contactMethods: true,
+        contacts: { include: { contactMethods: true } },
       },
     });
 
     return c.json(supplier);
   })
 
-  // POST /api/suppliers/:id/contacts - Add contact method
-  .post("/:id/contacts", zValidator("json", addContactMethodSchema), async (c) => {
+  // DELETE /api/suppliers/:id - Delete a supplier
+  .delete("/:id", async (c) => {
     const auth = getAuth(c);
     const supplierId = c.req.param("id");
 
@@ -256,20 +302,138 @@ const app = new Hono()
     const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
     if (!user) return c.json({ error: "User not found" }, 404);
 
-    // Verify ownership
+    const existing = await prisma.supplier.findUnique({ where: { id: supplierId } });
+    if (!existing || existing.userId !== user.id) {
+      return c.json({ error: "Supplier not found" }, 404);
+    }
+
+    await prisma.supplier.delete({ where: { id: supplierId } });
+
+    return c.json({ success: true });
+  })
+
+  // ============================================================================
+  // CONTACTS
+  // ============================================================================
+
+  // POST /api/suppliers/:id/contacts - Add a contact to a supplier
+  .post("/:id/contacts", zValidator("json", addContactSchema), async (c) => {
+    const auth = getAuth(c);
+    const supplierId = c.req.param("id");
+
+    if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
+
+    const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
+    if (!user) return c.json({ error: "User not found" }, 404);
+
     const supplier = await prisma.supplier.findUnique({
       where: { id: supplierId },
     });
 
     if (!supplier || supplier.userId !== user.id) {
-      return c.json({ error: "Supplier not found or unauthorized" }, 404);
+      return c.json({ error: "Supplier not found" }, 404);
     }
 
     const data = c.req.valid("json");
 
-    const contactMethod = await prisma.contactMethod.create({
+    // Create contact
+    const contact = await prisma.supplierContact.create({
       data: {
         supplierId,
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        isPrimary: data.isPrimary,
+      },
+    });
+
+    // Create email contact method
+    await prisma.contactMethod.create({
+      data: {
+        contactId: contact.id,
+        type: "EMAIL",
+        value: data.email,
+        isPrimary: true,
+      },
+    });
+
+    // Create phone contact method if provided
+    if (data.phone) {
+      await prisma.contactMethod.create({
+        data: {
+          contactId: contact.id,
+          type: "PHONE",
+          value: data.phone,
+          isPrimary: false,
+        },
+      });
+    }
+
+    const result = await prisma.supplierContact.findUnique({
+      where: { id: contact.id },
+      include: { contactMethods: true },
+    });
+
+    return c.json(result, 201);
+  })
+
+  // DELETE /api/suppliers/:supplierId/contacts/:contactId - Remove a contact
+  .delete("/:supplierId/contacts/:contactId", async (c) => {
+    const auth = getAuth(c);
+    const { supplierId, contactId } = c.req.param();
+
+    if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
+
+    const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
+    if (!user) return c.json({ error: "User not found" }, 404);
+
+    const supplier = await prisma.supplier.findUnique({ where: { id: supplierId } });
+    if (!supplier || supplier.userId !== user.id) {
+      return c.json({ error: "Supplier not found" }, 404);
+    }
+
+    const contact = await prisma.supplierContact.findUnique({ where: { id: contactId } });
+    if (!contact || contact.supplierId !== supplierId) {
+      return c.json({ error: "Contact not found" }, 404);
+    }
+
+    await prisma.supplierContact.delete({ where: { id: contactId } });
+
+    return c.json({ success: true });
+  })
+
+  // ============================================================================
+  // CONTACT METHODS
+  // ============================================================================
+
+  // POST /api/suppliers/:id/contact-methods - Add contact method to a contact
+  .post("/:id/contact-methods", zValidator("json", addContactMethodSchema), async (c) => {
+    const auth = getAuth(c);
+    const supplierId = c.req.param("id");
+
+    if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
+
+    const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
+    if (!user) return c.json({ error: "User not found" }, 404);
+
+    const supplier = await prisma.supplier.findUnique({ where: { id: supplierId } });
+    if (!supplier || supplier.userId !== user.id) {
+      return c.json({ error: "Supplier not found" }, 404);
+    }
+
+    const data = c.req.valid("json");
+
+    // Verify contact belongs to this supplier
+    const contact = await prisma.supplierContact.findUnique({
+      where: { id: data.contactId },
+    });
+    if (!contact || contact.supplierId !== supplierId) {
+      return c.json({ error: "Contact not found" }, 404);
+    }
+
+    const contactMethod = await prisma.contactMethod.create({
+      data: {
+        contactId: data.contactId,
         type: data.type,
         value: data.value,
         label: data.label,

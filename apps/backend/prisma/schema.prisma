@@ -117,17 +117,21 @@ model SupplierCategory {
 }
 
 model Supplier {
-  id        String   @id @default(cuid())
-  name      String   // Business Name or Primary Contact Name
-  notes     String?
+  id               String   @id @default(cuid())
+  name             String   // Business Name
+  domain           String?  // null for personal domains (gmail, etc.)
+  isPersonalDomain Boolean  @default(false) // true if this is a freelancer/individual
+  notes            String?
   
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Many-to-many with categories
   categories         SupplierToCategory[]
 
-  contactMethods     ContactMethod[]
+  // Contacts at this company
+  contacts           SupplierContact[]
+  
   projectSuppliers   ProjectSupplier[]
   messages           Message[] // Aggregate messages for the supplier
   supplierCandidates SupplierCandidate[] // Candidates that became this supplier
@@ -135,7 +139,30 @@ model Supplier {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // For business domains, ensure unique per user
+  @@unique([userId, domain])
   @@map("suppliers")
+}
+
+// Individual contact person at a Supplier (company)
+model SupplierContact {
+  id         String   @id @default(cuid())
+  name       String   // Person's name
+  email      String   // Their email address
+  role       String?  // "Owner", "Sales Rep", "Account Manager", etc.
+  isPrimary  Boolean  @default(false) // Primary contact for this supplier
+  
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  contactMethods ContactMethod[]
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([email]) // Email is globally unique
+  @@index([supplierId])
+  @@map("supplier_contacts")
 }
 
 // Junction table for Supplier <-> Category many-to-many
@@ -163,8 +190,9 @@ model ContactMethod {
   label      String?  // e.g., "Main Office", "Emergency", "Bob's Cell"
   isPrimary  Boolean  @default(false)
 
-  supplierId String
-  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  // Link to contact, not supplier directly
+  contactId  String
+  contact    SupplierContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   messages   Message[] // Messages specifically via this method
 
@@ -301,19 +329,25 @@ model SupplierCandidate {
   firstSeenAt           DateTime @default(now())
   lastSeenAt            DateTime @default(now())
 
+  // Email context for AI enrichment
+  // Array of: {subject: string, content: string, date: string}
+  emailContextJson      Json?    // Cleaned email snippets (up to 5)
+
   // AI suggestions
   suggestedSupplierName String?
+  suggestedContactName  String?  // Person's name if different from company
+  suggestedRole         String?  // "Owner", "Sales", etc.
   suggestedCategories   String[] // Array of category slugs, e.g. ["photography", "videography"]
   primaryCategory       String?  // Main category slug for display
   confidence            Float?   // 0-1
   isRelevant            Boolean? // AI determined if this is a relevant supplier
   enrichmentJson        Json?    // Raw enrichment result
 
-  // If accepted, link to created supplier
+  // If accepted, link to created supplier and contact
   supplierId            String?
   supplier              Supplier? @relation(fields: [supplierId], references: [id])
 
-  enrichmentJobs        SupplierEnrichmentJob[]
+  enrichmentRuns        EnrichmentRun[]
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -324,25 +358,75 @@ model SupplierCandidate {
   @@map("supplier_candidates")
 }
 
-model SupplierEnrichmentJob {
+// --- A/B Testing Infrastructure for Enrichment ---
+
+model EnrichmentExperiment {
   id            String   @id @default(cuid())
-  userId        String
+  name          String   // "GPT-5 vs GPT-4o - v2 prompt with snippets"
+  description   String?  // Details about what's being tested
+  promptVersion String   // "v1", "v2-with-snippets", "v3-400-char"
+  modelConfig   Json     // {model: "gpt-5-mini", maxTokens: 2000, ...}
+  isActive      Boolean  @default(true)
+  
+  runs          EnrichmentRun[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("enrichment_experiments")
+}
+
+model EnrichmentRun {
+  id            String   @id @default(cuid())
+  
+  experimentId  String
+  experiment    EnrichmentExperiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  
   candidateId   String
   candidate     SupplierCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  provider      String   // openai, anthropic
-  model         String   // gpt-4o-mini, etc.
-  promptVersion String   @default("v1")
-  inputHash     String   // Hash of input data for caching
   
-  resultJson    Json?
-  confidence    Float?
-  errorMessage  String?
-
+  // Model info
+  model         String   // "gpt-5-mini", "gpt-4o-mini"
+  promptVersion String   // Version of the prompt used
+  
+  // Metrics
+  inputTokens   Int
+  outputTokens  Int
+  latencyMs     Int
+  cost          Float    // Calculated from tokens
+  
+  // Full audit trail
+  rawPrompt     String   @db.Text
+  rawResponse   String   @db.Text
+  
+  // Parsed result
+  resultJson    Json?    // Parsed response: {suggestedName, categories, etc.}
+  
+  feedback      EnrichmentFeedback?
+  
   createdAt     DateTime @default(now())
 
-  @@index([inputHash])
-  @@map("supplier_enrichment_jobs")
+  @@index([experimentId])
+  @@index([candidateId])
+  @@map("enrichment_runs")
+}
+
+model EnrichmentFeedback {
+  id                  String   @id @default(cuid())
+  
+  runId               String   @unique
+  run                 EnrichmentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  
+  isCorrect           Boolean  // Was the AI's classification correct?
+  correctedName       String?  // If name was wrong
+  correctedCategories Json?    // If categories were wrong: ["photography", "videography"]
+  correctedRelevance  Boolean? // If relevance was wrong
+  notes               String?  // Freeform notes from reviewer
+  
+  feedbackBy          String?  // userId who provided feedback
+  feedbackAt          DateTime @default(now())
+
+  @@map("enrichment_feedback")
 }
 
 // Global domain info cache (shared across users for efficiency)

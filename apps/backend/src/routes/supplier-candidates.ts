@@ -33,26 +33,58 @@ async function getCategoryBySlug(slug: string) {
   return prisma.supplierCategory.findUnique({ where: { slug } });
 }
 
-// Helper: create supplier with category links
+// Helper: extract domain from email
+function extractDomain(email: string): string {
+  const parts = email.split("@");
+  return parts.length === 2 ? parts[1].toLowerCase() : "";
+}
+
+// Personal email domains (no domain grouping)
+const PERSONAL_DOMAINS = new Set([
+  "gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
+  "icloud.com", "aol.com", "protonmail.com", "me.com",
+  "live.com", "msn.com",
+]);
+
+// Helper: create supplier with contact and category links
 async function createSupplierWithCategories(
   userId: string,
-  name: string,
+  supplierName: string,
+  contactName: string,
   email: string,
   categorySlugs: string[],
   primarySlug: string | null
 ) {
+  const domain = extractDomain(email);
+  const isPersonal = PERSONAL_DOMAINS.has(domain);
+
   // Create supplier
   const supplier = await prisma.supplier.create({
     data: {
       userId,
-      name,
-      contactMethods: {
-        create: {
-          type: "EMAIL",
-          value: email,
-          isPrimary: true,
-        },
-      },
+      name: supplierName,
+      domain: isPersonal ? null : domain,
+      isPersonalDomain: isPersonal,
+    },
+  });
+
+  // Create contact
+  const contact = await prisma.supplierContact.create({
+    data: {
+      supplierId: supplier.id,
+      name: contactName || email.split("@")[0],
+      email,
+      isPrimary: true,
+    },
+  });
+
+  // Create email contact method
+  await prisma.contactMethod.create({
+    data: {
+      contactId: contact.id,
+      type: "EMAIL",
+      value: email,
+      isPrimary: true,
     },
   });
 
@@ -70,12 +102,12 @@ async function createSupplierWithCategories(
     }
   }
 
-  // Fetch with categories
+  // Fetch with categories and contacts
   return prisma.supplier.findUnique({
     where: { id: supplier.id },
     include: {
       categories: { include: { category: true } },
-      contactMethods: true,
+      contacts: { include: { contactMethods: true } },
     },
   });
 }
@@ -126,7 +158,7 @@ const app = new Hono()
       where: { id: candidateId },
       include: {
         supplier: true,
-        enrichmentJobs: {
+        enrichmentRuns: {
           orderBy: { createdAt: "desc" },
           take: 1,
         },
@@ -176,9 +208,11 @@ const app = new Hono()
     const primarySlug = data.primaryCategory || candidate.primaryCategory || categorySlugs[0] || null;
 
     // Create Supplier with categories
+    const contactName = candidate.suggestedContactName || candidate.displayName || candidate.email.split("@")[0];
     const supplier = await createSupplierWithCategories(
       user.id,
       supplierName,
+      contactName,
       candidate.email,
       categorySlugs,
       primarySlug
@@ -258,6 +292,7 @@ const app = new Hono()
           candidate.suggestedSupplierName ||
           candidate.displayName ||
           candidate.email.split("@")[0];
+        const contactName = candidate.suggestedContactName || candidate.displayName || candidate.email.split("@")[0];
 
         const categorySlugs = candidate.suggestedCategories || [];
         const primarySlug = candidate.primaryCategory || categorySlugs[0] || null;
@@ -266,6 +301,7 @@ const app = new Hono()
         const supplier = await createSupplierWithCategories(
           user.id,
           supplierName,
+          contactName,
           candidate.email,
           categorySlugs,
           primarySlug
