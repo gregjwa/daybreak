@@ -74,7 +74,6 @@ export async function processEmailsWithToken(
 
   for (const msg of newMessages) {
     if (!msg.id) continue;
-
     // Check if already processed
     const existing = await prisma.message.findFirst({
       where: { externalId: msg.id },
