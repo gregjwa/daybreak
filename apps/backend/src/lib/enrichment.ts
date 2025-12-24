@@ -116,8 +116,9 @@ Respond with ONLY a valid JSON array.`;
         { role: "system", content: systemPrompt },
         { role: "user", content: `Classify these ${candidates.length} contacts:\n\n${inputList}` },
       ],
-      temperature: 0.2,
-      max_completion_tokens: 2000, // Changed from max_tokens for newer models (gpt-4o, gpt-5, etc.)
+      max_completion_tokens: 2000,
+      // Note: temperature omitted - GPT-5 models only support default (1)
+      // For structured classification with clear instructions, default works fine
     }),
   });
 
