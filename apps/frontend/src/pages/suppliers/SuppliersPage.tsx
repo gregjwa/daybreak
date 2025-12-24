@@ -37,15 +37,19 @@ export default function SuppliersPage() {
   // Transform for table
   const rows = useMemo<SupplierRow[]>(() => {
     if (!suppliers) return [];
-    return suppliers.map(s => ({
-      id: s.id,
-      name: s.name,
-      category: s.category?.name || null,
-      projectCount: s._count?.projectSuppliers || 0,
-      messageCount: s._count?.messages || 0,
-      primaryEmail: s.contactMethods.find(c => c.type === "EMAIL" && c.isPrimary)?.value 
-        || s.contactMethods.find(c => c.type === "EMAIL")?.value,
-    }));
+    return suppliers.map(s => {
+      const primaryCat = s.categories?.find(c => c.isPrimary)?.category?.name;
+      const firstCat = s.categories?.[0]?.category?.name;
+      return {
+        id: s.id,
+        name: s.name,
+        category: primaryCat || firstCat || null,
+        projectCount: s._count?.projectSuppliers || 0,
+        messageCount: s._count?.messages || 0,
+        primaryEmail: s.contactMethods.find(c => c.type === "EMAIL" && c.isPrimary)?.value 
+          || s.contactMethods.find(c => c.type === "EMAIL")?.value,
+      };
+    });
   }, [suppliers]);
 
   // Filter
@@ -127,7 +131,6 @@ export default function SuppliersPage() {
     if (!newSupplier.name.trim()) return;
     await createSupplier.mutateAsync({
       name: newSupplier.name.trim(),
-      categoryName: newSupplier.categoryName.trim() || undefined,
       email: newSupplier.email.trim() || undefined,
     });
     setNewSupplier({ name: "", categoryName: "", email: "" });

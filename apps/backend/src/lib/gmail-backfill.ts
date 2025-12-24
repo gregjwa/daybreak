@@ -1,24 +1,5 @@
-import { google, gmail_v1 } from "googleapis";
+import { google } from "googleapis";
 import { prisma } from "../db";
-
-// Personal email domains to skip by default (can be expanded)
-const PERSONAL_DOMAINS = new Set([
-  "gmail.com",
-  "googlemail.com",
-  "yahoo.com",
-  "yahoo.co.uk",
-  "hotmail.com",
-  "outlook.com",
-  "live.com",
-  "msn.com",
-  "icloud.com",
-  "me.com",
-  "aol.com",
-  "protonmail.com",
-  "proton.me",
-  "mail.com",
-  "zoho.com",
-]);
 
 // Extract email from header format: "Name <email@domain.com>" or just "email@domain.com"
 function extractEmail(input: string): string | null {
@@ -45,11 +26,6 @@ function extractDomain(email: string): string {
   return parts.length === 2 ? parts[1].toLowerCase() : "";
 }
 
-// Check if domain is a personal email provider
-function isPersonalDomain(domain: string): boolean {
-  return PERSONAL_DOMAINS.has(domain);
-}
-
 interface BackfillTickResult {
   done: boolean;
   scannedThisTick: number;
@@ -67,14 +43,15 @@ interface BackfillTickResult {
 /**
  * Process one "tick" of the backfill run - fetches one page of Gmail messages
  * and extracts recipients as SupplierCandidates.
+ * Note: We include ALL recipients (including gmail.com, etc.) because freelancers use personal emails.
+ * AI will filter based on relevance to user's event context.
  */
 export async function processBackfillTick(
   accessToken: string,
   runId: string,
-  opts?: { maxMessagesPerTick?: number; includePersonalDomains?: boolean }
+  opts?: { maxMessagesPerTick?: number }
 ): Promise<BackfillTickResult> {
   const maxMessages = opts?.maxMessagesPerTick || 50;
-  const includePersonal = opts?.includePersonalDomains || false;
 
   // Get current run
   const run = await prisma.backfillRun.findUnique({ where: { id: runId } });
@@ -162,9 +139,6 @@ export async function processBackfillTick(
 
           const domain = extractDomain(email);
           if (!domain) continue;
-
-          // Skip personal domains unless opted in
-          if (!includePersonal && isPersonalDomain(domain)) continue;
 
           // Skip if we've already seen this email in this tick
           if (seenEmails.has(email)) continue;
@@ -262,7 +236,8 @@ export async function processBackfillTick(
  */
 export async function createBackfillRun(
   userId: string,
-  timeframeMonths: number = 6
+  timeframeMonths: number = 6,
+  eventContext?: string
 ): Promise<{ id: string; gmailQuery: string }> {
   const gmailQuery = `in:sent newer_than:${timeframeMonths}m`;
 
@@ -271,9 +246,18 @@ export async function createBackfillRun(
       userId,
       timeframeMonths,
       gmailQuery,
+      eventContext,
       status: "PENDING",
     },
   });
+
+  // Also update user's eventContext if provided
+  if (eventContext) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { eventContext },
+    });
+  }
 
   return { id: run.id, gmailQuery: run.gmailQuery };
 }
@@ -289,10 +273,16 @@ export async function getBackfillRunStatus(runId: string) {
     id: run.id,
     status: run.status,
     timeframeMonths: run.timeframeMonths,
+    eventContext: run.eventContext,
     scannedMessages: run.scannedMessages,
     discoveredContacts: run.discoveredContacts,
     createdCandidates: run.createdCandidates,
     errorsCount: run.errorsCount,
+    // Enrichment phase
+    enrichmentStatus: run.enrichmentStatus,
+    enrichedCount: run.enrichedCount,
+    autoImportedCount: run.autoImportedCount,
+    // Timestamps
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     hasMorePages: run.nextPageToken !== null,

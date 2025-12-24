@@ -11,14 +11,19 @@ import {
   getBackfillRunStatus,
   cancelBackfillRun,
 } from "../lib/gmail-backfill";
+import { runEnrichmentPipeline } from "../lib/enrichment";
 
 const startBackfillSchema = z.object({
   timeframeMonths: z.number().min(1).max(24).default(6),
+  eventContext: z.string().optional(), // "I plan weddings and corporate events"
 });
 
 const tickBackfillSchema = z.object({
   maxMessagesPerTick: z.number().min(10).max(100).optional(),
-  includePersonalDomains: z.boolean().optional(),
+});
+
+const enrichSchema = z.object({
+  threshold: z.number().min(0).max(1).optional(),
 });
 
 const app = new Hono()
@@ -200,12 +205,13 @@ const app = new Hono()
       }
 
       const data = c.req.valid("json");
-      const run = await createBackfillRun(user.id, data.timeframeMonths);
+      const run = await createBackfillRun(user.id, data.timeframeMonths, data.eventContext);
 
       return c.json({
         success: true,
         runId: run.id,
         gmailQuery: run.gmailQuery,
+        eventContext: data.eventContext,
       }, 201);
     } catch (error) {
       console.error("Error starting backfill:", error);
@@ -265,7 +271,6 @@ const app = new Hono()
 
       const result = await processBackfillTick(accessToken, runId, {
         maxMessagesPerTick: data.maxMessagesPerTick,
-        includePersonalDomains: data.includePersonalDomains,
       });
 
       return c.json(result);
@@ -322,14 +327,62 @@ const app = new Hono()
         activeRun: {
           id: activeRun.id,
           status: activeRun.status,
+          eventContext: activeRun.eventContext,
           scannedMessages: activeRun.scannedMessages,
           createdCandidates: activeRun.createdCandidates,
+          enrichmentStatus: activeRun.enrichmentStatus,
+          enrichedCount: activeRun.enrichedCount,
+          autoImportedCount: activeRun.autoImportedCount,
           startedAt: activeRun.startedAt,
         },
       });
     } catch (error) {
       console.error("Error getting active backfill:", error);
       return c.json({ error: "Failed to get active run" }, 500);
+    }
+  })
+
+  // POST /api/emails/backfill/:runId/enrich - Run AI enrichment + auto-import
+  .post("/backfill/:runId/enrich", zValidator("json", enrichSchema), async (c) => {
+    const auth = getAuth(c);
+    if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
+
+    const runId = c.req.param("runId");
+
+    try {
+      const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
+      if (!user) return c.json({ error: "User not found" }, 404);
+
+      // Verify ownership
+      const run = await prisma.backfillRun.findUnique({ where: { id: runId } });
+      if (!run || run.userId !== user.id) return c.json({ error: "Run not found" }, 404);
+
+      // Check that discovery phase is complete
+      if (run.status !== "COMPLETED") {
+        return c.json({ error: "Discovery phase not complete" }, 400);
+      }
+
+      // Check if already enriching
+      if (run.enrichmentStatus === "RUNNING") {
+        return c.json({ error: "Enrichment already in progress" }, 409);
+      }
+
+      // Get event context
+      const eventContext = run.eventContext || user.eventContext || "";
+
+      // Run the enrichment pipeline
+      const result = await runEnrichmentPipeline(runId, eventContext);
+
+      return c.json({
+        success: true,
+        enriched: result.enriched,
+        imported: result.imported,
+        dismissed: result.dismissed,
+        needsReview: result.needsReview,
+      });
+    } catch (error) {
+      console.error("Error running enrichment:", error);
+      return c.json({ error: "Failed to run enrichment" }, 500);
     }
   });
 

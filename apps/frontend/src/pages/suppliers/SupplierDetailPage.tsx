@@ -154,11 +154,19 @@ export default function SupplierDetailPage() {
                 </h1>
               )}
 
-              {/* Category */}
-              {supplier.category ? (
-                <Badge variant="secondary" className="font-normal">
-                  {supplier.category.name}
-                </Badge>
+              {/* Categories */}
+              {supplier.categories && supplier.categories.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {supplier.categories.map((stc) => (
+                    <Badge 
+                      key={stc.id} 
+                      variant={stc.isPrimary ? "default" : "secondary"} 
+                      className="font-normal"
+                    >
+                      {stc.category.name}
+                    </Badge>
+                  ))}
+                </div>
               ) : (
                 <span className="text-sm text-muted-foreground italic">No category</span>
               )}

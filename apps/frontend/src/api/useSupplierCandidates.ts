@@ -26,10 +26,14 @@ export interface SupplierCandidate {
   messageCount: number;
   firstSeenAt: string;
   lastSeenAt: string;
+  // AI-enriched fields
   suggestedSupplierName: string | null;
-  suggestedCategoryName: string | null;
+  suggestedCategories: string[]; // Array of category slugs
+  primaryCategory: string | null;
   confidence: number | null;
+  isRelevant: boolean | null;
   enrichmentJson: any;
+  // Link to created supplier
   supplierId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -62,11 +66,13 @@ export function useAcceptCandidate() {
     mutationFn: async ({
       candidateId,
       supplierName,
-      categoryName,
+      categories,
+      primaryCategory,
     }: {
       candidateId: string;
       supplierName?: string;
-      categoryName?: string;
+      categories?: string[];
+      primaryCategory?: string;
     }) => {
       const token = await getToken();
       const res = await fetch(`${API_URL}/supplier-candidates/${candidateId}/accept`, {
@@ -75,7 +81,7 @@ export function useAcceptCandidate() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ supplierName, categoryName }),
+        body: JSON.stringify({ supplierName, categories, primaryCategory }),
       });
       if (!res.ok) {
         const err = await res.json();

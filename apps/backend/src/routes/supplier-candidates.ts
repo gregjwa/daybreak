@@ -3,20 +3,24 @@ import { getAuth } from "@hono/clerk-auth";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { prisma } from "../db";
-import { enrichSupplierCandidate, enrichCandidatesBatch } from "../lib/enrichment";
+import { enrichCandidatesParallel, autoImportCandidates, CATEGORY_SLUGS } from "../lib/enrichment";
 
 const acceptCandidateSchema = z.object({
   supplierName: z.string().min(1).optional(), // Override suggested name
-  categoryName: z.string().optional(), // Override suggested category
+  categories: z.array(z.string()).optional(), // Override suggested categories (slugs)
+  primaryCategory: z.string().optional(), // Override primary category
 });
 
 const enrichCandidatesSchema = z.object({
-  candidateIds: z.array(z.string()).min(1).max(50),
-  scrapeDomain: z.boolean().optional(),
+  eventContext: z.string().optional(),
 });
 
 const bulkAcceptSchema = z.object({
   candidateIds: z.array(z.string()).min(1).max(100),
+});
+
+const autoImportSchema = z.object({
+  threshold: z.number().min(0).max(1).optional(),
 });
 
 // Helper: slugify category name
@@ -24,26 +28,56 @@ function slugify(name: string): string {
   return name.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 }
 
-// Helper: get or create category by name
-async function getOrCreateCategory(userId: string, categoryName: string) {
-  const slug = slugify(categoryName);
-  if (!slug) return null;
+// Helper: get category by slug (system or user-created)
+async function getCategoryBySlug(slug: string) {
+  return prisma.supplierCategory.findUnique({ where: { slug } });
+}
 
-  let category = await prisma.supplierCategory.findUnique({
-    where: { userId_slug: { userId, slug } },
+// Helper: create supplier with category links
+async function createSupplierWithCategories(
+  userId: string,
+  name: string,
+  email: string,
+  categorySlugs: string[],
+  primarySlug: string | null
+) {
+  // Create supplier
+  const supplier = await prisma.supplier.create({
+    data: {
+      userId,
+      name,
+      contactMethods: {
+        create: {
+          type: "EMAIL",
+          value: email,
+          isPrimary: true,
+        },
+      },
+    },
   });
 
-  if (!category) {
-    category = await prisma.supplierCategory.create({
-      data: {
-        userId,
-        name: categoryName.trim(),
-        slug,
-      },
-    });
+  // Link categories
+  for (const slug of categorySlugs) {
+    const category = await getCategoryBySlug(slug);
+    if (category) {
+      await prisma.supplierToCategory.create({
+        data: {
+          supplierId: supplier.id,
+          categoryId: category.id,
+          isPrimary: slug === primarySlug,
+        },
+      });
+    }
   }
 
-  return category;
+  // Fetch with categories
+  return prisma.supplier.findUnique({
+    where: { id: supplier.id },
+    include: {
+      categories: { include: { category: true } },
+      contactMethods: true,
+    },
+  });
 }
 
 const app = new Hono()
@@ -137,33 +171,22 @@ const app = new Hono()
       candidate.displayName ||
       candidate.email.split("@")[0];
 
-    // Determine category
-    let categoryId: string | null = null;
-    const categoryName = data.categoryName || candidate.suggestedCategoryName;
-    if (categoryName) {
-      const category = await getOrCreateCategory(user.id, categoryName);
-      categoryId = category?.id || null;
-    }
+    // Determine categories (use provided, or fall back to AI suggestions)
+    const categorySlugs = data.categories || candidate.suggestedCategories || [];
+    const primarySlug = data.primaryCategory || candidate.primaryCategory || categorySlugs[0] || null;
 
-    // Create Supplier with ContactMethod
-    const supplier = await prisma.supplier.create({
-      data: {
-        userId: user.id,
-        name: supplierName,
-        categoryId,
-        contactMethods: {
-          create: {
-            type: "EMAIL",
-            value: candidate.email,
-            isPrimary: true,
-          },
-        },
-      },
-      include: {
-        category: true,
-        contactMethods: true,
-      },
-    });
+    // Create Supplier with categories
+    const supplier = await createSupplierWithCategories(
+      user.id,
+      supplierName,
+      candidate.email,
+      categorySlugs,
+      primarySlug
+    );
+
+    if (!supplier) {
+      return c.json({ error: "Failed to create supplier" }, 500);
+    }
 
     // Update candidate status
     await prisma.supplierCandidate.update({
@@ -230,33 +253,28 @@ const app = new Hono()
           continue;
         }
 
-        // Determine name and category
+        // Determine name and categories
         const supplierName =
           candidate.suggestedSupplierName ||
           candidate.displayName ||
           candidate.email.split("@")[0];
 
-        let categoryId: string | null = null;
-        if (candidate.suggestedCategoryName) {
-          const category = await getOrCreateCategory(user.id, candidate.suggestedCategoryName);
-          categoryId = category?.id || null;
-        }
+        const categorySlugs = candidate.suggestedCategories || [];
+        const primarySlug = candidate.primaryCategory || categorySlugs[0] || null;
 
-        // Create Supplier
-        const supplier = await prisma.supplier.create({
-          data: {
-            userId: user.id,
-            name: supplierName,
-            categoryId,
-            contactMethods: {
-              create: {
-                type: "EMAIL",
-                value: candidate.email,
-                isPrimary: true,
-              },
-            },
-          },
-        });
+        // Create Supplier with categories
+        const supplier = await createSupplierWithCategories(
+          user.id,
+          supplierName,
+          candidate.email,
+          categorySlugs,
+          primarySlug
+        );
+
+        if (!supplier) {
+          results.push({ candidateId, error: "Failed to create" });
+          continue;
+        }
 
         // Update candidate
         await prisma.supplierCandidate.update({
@@ -302,7 +320,7 @@ const app = new Hono()
     return c.json({ success: true });
   })
 
-  // POST /api/supplier-candidates/enrich - Enrich candidates with AI
+  // POST /api/supplier-candidates/enrich - Enrich candidates with AI (parallel batch)
   .post("/enrich", zValidator("json", enrichCandidatesSchema), async (c) => {
     const auth = getAuth(c);
     if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
@@ -311,32 +329,35 @@ const app = new Hono()
     if (!user) return c.json({ error: "User not found" }, 404);
 
     const data = c.req.valid("json");
+    const eventContext = data.eventContext || user.eventContext || "";
 
-    // Verify all candidates belong to user
-    const candidates = await prisma.supplierCandidate.findMany({
-      where: {
-        id: { in: data.candidateIds },
-        userId: user.id,
-      },
-      select: { id: true },
-    });
-
-    const validIds = candidates.map((c) => c.id);
-    if (validIds.length === 0) {
-      return c.json({ error: "No valid candidates" }, 400);
-    }
-
-    // Start enrichment (this could be slow, so we return immediately and process async)
-    // For now, we'll do it synchronously but with rate limiting
-    const result = await enrichCandidatesBatch(validIds, {
-      scrapeDomain: data.scrapeDomain,
-      delayMs: 500,
-    });
+    // Run parallel batch enrichment
+    const result = await enrichCandidatesParallel(user.id, eventContext);
 
     return c.json({
       success: true,
       enriched: result.enriched,
       errors: result.errors,
+    });
+  })
+
+  // POST /api/supplier-candidates/auto-import - Auto-import high-confidence candidates
+  .post("/auto-import", zValidator("json", autoImportSchema), async (c) => {
+    const auth = getAuth(c);
+    if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
+
+    const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
+    if (!user) return c.json({ error: "User not found" }, 404);
+
+    const data = c.req.valid("json");
+    
+    const result = await autoImportCandidates(user.id, { threshold: data.threshold });
+
+    return c.json({
+      success: true,
+      imported: result.imported,
+      dismissed: result.dismissed,
+      needsReview: result.needsReview,
     });
   })
 

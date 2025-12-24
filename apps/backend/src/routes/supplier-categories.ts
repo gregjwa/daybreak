@@ -6,10 +6,12 @@ import { z } from "zod";
 
 const createCategorySchema = z.object({
   name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
 });
 
 const updateCategorySchema = z.object({
-  name: z.string().min(1).max(100),
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(500).optional(),
 });
 
 // Helper: slugify category name
@@ -18,7 +20,7 @@ function slugify(name: string): string {
 }
 
 const app = new Hono()
-  // GET /api/supplier-categories - List/search categories (autosuggest)
+  // GET /api/supplier-categories - List/search categories (system + user-created)
   .get("/", async (c) => {
     const auth = getAuth(c);
     if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
@@ -27,28 +29,33 @@ const app = new Hono()
       where: { clerkId: auth.userId },
     });
 
-    if (!user) return c.json([]);
-
     const query = c.req.query("query")?.trim().toLowerCase() || "";
 
+    // Get system categories + user-created categories
     const categories = await prisma.supplierCategory.findMany({
       where: {
-        userId: user.id,
+        OR: [
+          { isSystem: true }, // All system categories
+          { userId: user?.id }, // User-created categories
+        ],
         ...(query && {
-          OR: [
-            { name: { contains: query, mode: "insensitive" } },
-            { slug: { contains: query, mode: "insensitive" } },
-          ],
+          AND: {
+            OR: [
+              { name: { contains: query, mode: "insensitive" } },
+              { slug: { contains: query, mode: "insensitive" } },
+              { description: { contains: query, mode: "insensitive" } },
+            ],
+          },
         }),
       },
-      orderBy: { name: "asc" },
-      take: 50,
+      orderBy: [{ isSystem: "desc" }, { name: "asc" }],
+      take: 100,
     });
 
     return c.json(categories);
   })
 
-  // POST /api/supplier-categories - Create a new category
+  // POST /api/supplier-categories - Create a new user category
   .post("/", zValidator("json", createCategorySchema), async (c) => {
     const auth = getAuth(c);
     if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
@@ -66,9 +73,9 @@ const app = new Hono()
       return c.json({ error: "Invalid category name" }, 400);
     }
 
-    // Check for duplicate
+    // Check for duplicate (global unique slug)
     const existing = await prisma.supplierCategory.findUnique({
-      where: { userId_slug: { userId: user.id, slug } },
+      where: { slug },
     });
 
     if (existing) {
@@ -81,13 +88,15 @@ const app = new Hono()
         userId: user.id,
         name: data.name.trim(),
         slug,
+        description: data.description,
+        isSystem: false,
       },
     });
 
     return c.json(category, 201);
   })
 
-  // PATCH /api/supplier-categories/:id - Rename a category
+  // PATCH /api/supplier-categories/:id - Update a category (user-created only)
   .patch("/:id", zValidator("json", updateCategorySchema), async (c) => {
     const auth = getAuth(c);
     const categoryId = c.req.param("id");
@@ -100,45 +109,56 @@ const app = new Hono()
 
     if (!user) return c.json({ error: "User not found" }, 404);
 
-    // Verify ownership
+    // Verify ownership - can only edit user-created categories
     const existing = await prisma.supplierCategory.findUnique({
       where: { id: categoryId },
     });
 
-    if (!existing || existing.userId !== user.id) {
+    if (!existing) {
+      return c.json({ error: "Category not found" }, 404);
+    }
+
+    if (existing.isSystem) {
+      return c.json({ error: "Cannot edit system categories" }, 403);
+    }
+
+    if (existing.userId !== user.id) {
       return c.json({ error: "Category not found" }, 404);
     }
 
     const data = c.req.valid("json");
-    const newSlug = slugify(data.name);
 
-    if (!newSlug) {
-      return c.json({ error: "Invalid category name" }, 400);
-    }
+    // If renaming, check for duplicate slug
+    let newSlug = existing.slug;
+    if (data.name) {
+      newSlug = slugify(data.name);
+      if (!newSlug) {
+        return c.json({ error: "Invalid category name" }, 400);
+      }
 
-    // Check for duplicate slug (if renaming to existing name)
-    if (newSlug !== existing.slug) {
-      const duplicate = await prisma.supplierCategory.findUnique({
-        where: { userId_slug: { userId: user.id, slug: newSlug } },
-      });
+      if (newSlug !== existing.slug) {
+        const duplicate = await prisma.supplierCategory.findUnique({
+          where: { slug: newSlug },
+        });
 
-      if (duplicate) {
-        return c.json({ error: "A category with this name already exists" }, 409);
+        if (duplicate) {
+          return c.json({ error: "A category with this name already exists" }, 409);
+        }
       }
     }
 
     const category = await prisma.supplierCategory.update({
       where: { id: categoryId },
       data: {
-        name: data.name.trim(),
-        slug: newSlug,
+        ...(data.name && { name: data.name.trim(), slug: newSlug }),
+        ...(data.description !== undefined && { description: data.description }),
       },
     });
 
     return c.json(category);
   })
 
-  // DELETE /api/supplier-categories/:id - Delete a category
+  // DELETE /api/supplier-categories/:id - Delete a category (user-created only)
   .delete("/:id", async (c) => {
     const auth = getAuth(c);
     const categoryId = c.req.param("id");
@@ -151,16 +171,24 @@ const app = new Hono()
 
     if (!user) return c.json({ error: "User not found" }, 404);
 
-    // Verify ownership
+    // Verify ownership - can only delete user-created categories
     const existing = await prisma.supplierCategory.findUnique({
       where: { id: categoryId },
     });
 
-    if (!existing || existing.userId !== user.id) {
+    if (!existing) {
       return c.json({ error: "Category not found" }, 404);
     }
 
-    // Deleting category will set categoryId to null on associated suppliers (due to optional relation)
+    if (existing.isSystem) {
+      return c.json({ error: "Cannot delete system categories" }, 403);
+    }
+
+    if (existing.userId !== user.id) {
+      return c.json({ error: "Category not found" }, 404);
+    }
+
+    // Delete category (will cascade delete SupplierToCategory links)
     await prisma.supplierCategory.delete({
       where: { id: categoryId },
     });
@@ -169,4 +197,3 @@ const app = new Hono()
   });
 
 export default app;
-

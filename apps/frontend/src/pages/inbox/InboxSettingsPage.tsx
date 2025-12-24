@@ -4,6 +4,7 @@ import { Button } from "@/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
 import { Badge } from "@/ui/badge";
 import { Label } from "@/ui/label";
+import { Textarea } from "@/ui/textarea";
 import { Inbox, Mail, Sparkles, ArrowRight, Check, Loader2 } from "lucide-react";
 import { useActiveBackfill, useStartBackfill } from "@/api/useBackfill";
 import { useSupplierCandidates } from "@/api/useSupplierCandidates";
@@ -14,13 +15,14 @@ export default function InboxSettingsPage() {
   const { data: candidates } = useSupplierCandidates("NEW");
   const startBackfill = useStartBackfill();
   const [timeframe, setTimeframe] = useState(6);
+  const [eventContext, setEventContext] = useState("");
 
   const hasActiveRun = !!activeBackfill?.activeRun;
   const pendingCandidatesCount = candidates?.length || 0;
 
   const handleStartImport = async () => {
     try {
-      const result = await startBackfill.mutateAsync(timeframe);
+      const result = await startBackfill.mutateAsync({ timeframeMonths: timeframe, eventContext });
       navigate(`/inbox/import?runId=${result.runId}`);
     } catch (err) {
       console.error("Failed to start import:", err);
@@ -102,7 +104,25 @@ export default function InboxSettingsPage() {
                   Scan your sent emails to automatically discover vendors and contacts you've been working with.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-5">
+                {/* Event Context */}
+                <div className="space-y-2">
+                  <Label htmlFor="eventContext" className="text-sm font-medium">
+                    What type of events do you plan?
+                  </Label>
+                  <Textarea
+                    id="eventContext"
+                    placeholder="e.g., Weddings and corporate events in the Bay Area"
+                    value={eventContext}
+                    onChange={(e) => setEventContext(e.target.value)}
+                    className="min-h-[80px] resize-none"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    This helps AI identify relevant suppliers from your email contacts
+                  </p>
+                </div>
+
+                {/* Timeframe */}
                 <div className="flex items-center gap-4">
                   <Label className="text-sm">Timeframe:</Label>
                   <div className="flex gap-2">
@@ -126,15 +146,19 @@ export default function InboxSettingsPage() {
                 <div className="bg-muted/50 rounded-lg p-4 text-sm text-muted-foreground space-y-2">
                   <div className="flex items-start gap-2">
                     <Check className="h-4 w-4 mt-0.5 text-emerald-500" />
-                    <span>Only scans recipients of emails you've sent</span>
+                    <span>Scans all recipients from your sent emails</span>
                   </div>
                   <div className="flex items-start gap-2">
                     <Check className="h-4 w-4 mt-0.5 text-emerald-500" />
-                    <span>Personal emails (gmail, yahoo, etc.) are filtered out</span>
+                    <span>AI identifies relevant suppliers and auto-categorizes them</span>
                   </div>
                   <div className="flex items-start gap-2">
                     <Check className="h-4 w-4 mt-0.5 text-emerald-500" />
-                    <span>You review and approve each contact before import</span>
+                    <span>High-confidence matches are imported automatically</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Check className="h-4 w-4 mt-0.5 text-emerald-500" />
+                    <span>You can review and correct anything after</span>
                   </div>
                 </div>
 
@@ -165,10 +189,11 @@ export default function InboxSettingsPage() {
             <CardContent className="pt-6">
               <h3 className="font-medium mb-2">How it works</h3>
               <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
-                <li>We scan recipients from your sent emails</li>
-                <li>Business contacts are identified and grouped by domain</li>
-                <li>AI suggests a name and category for each contact</li>
-                <li>You review and confirm which ones to add as suppliers</li>
+                <li>We scan all recipients from your sent emails</li>
+                <li>AI analyzes each contact based on your event types</li>
+                <li>Relevant suppliers are categorized (Florist, Photographer, etc.)</li>
+                <li>High-confidence matches are imported automatically</li>
+                <li>Lower confidence contacts are shown for your review</li>
               </ol>
             </CardContent>
           </Card>
@@ -177,4 +202,3 @@ export default function InboxSettingsPage() {
     </div>
   );
 }
-

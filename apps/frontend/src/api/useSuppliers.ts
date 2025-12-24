@@ -13,12 +13,19 @@ export interface ContactMethod {
   isPrimary: boolean;
 }
 
+export interface SupplierToCategory {
+  id: string;
+  supplierId: string;
+  categoryId: string;
+  isPrimary: boolean;
+  category: SupplierCategory;
+}
+
 export interface Supplier {
   id: string;
   name: string;
   notes?: string | null;
-  categoryId?: string | null;
-  category?: SupplierCategory | null;
+  categories: SupplierToCategory[];
   contactMethods: ContactMethod[];
   _count?: {
     projectSuppliers?: number;
@@ -80,8 +87,8 @@ export function useSupplier(supplierId: string | undefined) {
 
 export interface CreateSupplierData {
   name: string;
-  categoryId?: string;
-  categoryName?: string;
+  categorySlugs?: string[];
+  primaryCategory?: string;
   notes?: string;
   email?: string;
   phone?: string;
@@ -113,8 +120,8 @@ export function useCreateSupplier() {
 
 export interface UpdateSupplierData {
   name?: string;
-  categoryId?: string;
-  categoryName?: string;
+  categorySlugs?: string[];
+  primaryCategory?: string;
   notes?: string;
 }
 

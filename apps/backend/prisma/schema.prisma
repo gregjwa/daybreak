@@ -78,12 +78,13 @@ model Invite {
 // --- CRM Models ---
 
 model User {
-  id        String   @id @default(cuid())
-  clerkId   String   @unique
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  clerkId      String   @unique
+  email        String   @unique
+  name         String?
+  eventContext String?  // "I plan weddings and corporate events"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   projects            Project[]
   suppliers           Supplier[]
@@ -96,19 +97,22 @@ model User {
 }
 
 model SupplierCategory {
-  id        String   @id @default(cuid())
-  name      String   // Display name, e.g. "Florist"
-  slug      String   // Lowercase normalized, e.g. "florist"
+  id          String   @id @default(cuid())
+  name        String   // Display name, e.g. "Florist"
+  slug        String   @unique // Lowercase normalized, e.g. "florist"
+  description String?  // "Floral design, bouquets, arrangements..."
+  isSystem    Boolean  @default(false) // True for seeded system categories
   
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Nullable for system categories, set for user-created
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   
-  suppliers Supplier[]
+  // Many-to-many with suppliers
+  suppliers   SupplierToCategory[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  @@unique([userId, slug])
   @@map("supplier_categories")
 }
 
@@ -120,8 +124,8 @@ model Supplier {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  categoryId String?
-  category   SupplierCategory? @relation(fields: [categoryId], references: [id])
+  // Many-to-many with categories
+  categories         SupplierToCategory[]
 
   contactMethods     ContactMethod[]
   projectSuppliers   ProjectSupplier[]
@@ -132,6 +136,24 @@ model Supplier {
   updatedAt DateTime @updatedAt
 
   @@map("suppliers")
+}
+
+// Junction table for Supplier <-> Category many-to-many
+model SupplierToCategory {
+  id          String   @id @default(cuid())
+  
+  supplierId  String
+  supplier    Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  
+  categoryId  String
+  category    SupplierCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  
+  isPrimary   Boolean  @default(false) // Main category for display purposes
+
+  createdAt   DateTime @default(now())
+
+  @@unique([supplierId, categoryId])
+  @@map("supplier_to_categories")
 }
 
 model ContactMethod {
@@ -241,12 +263,18 @@ model BackfillRun {
   timeframeMonths    Int      @default(6)
   gmailQuery         String   // e.g. "in:sent newer_than:6m"
   nextPageToken      String?  // For resuming Gmail pagination
+  eventContext       String?  // User's event types for AI context
   
-  // Progress counters
+  // Discovery progress counters
   scannedMessages    Int      @default(0)
   discoveredContacts Int      @default(0)
   createdCandidates  Int      @default(0)
   errorsCount        Int      @default(0)
+
+  // Enrichment phase tracking
+  enrichmentStatus   String   @default("PENDING") // PENDING, RUNNING, COMPLETED
+  enrichedCount      Int      @default(0)
+  autoImportedCount  Int      @default(0)
 
   startedAt          DateTime?
   completedAt        DateTime?
@@ -275,8 +303,10 @@ model SupplierCandidate {
 
   // AI suggestions
   suggestedSupplierName String?
-  suggestedCategoryName String?
+  suggestedCategories   String[] // Array of category slugs, e.g. ["photography", "videography"]
+  primaryCategory       String?  // Main category slug for display
   confidence            Float?   // 0-1
+  isRelevant            Boolean? // AI determined if this is a relevant supplier
   enrichmentJson        Json?    // Raw enrichment result
 
   // If accepted, link to created supplier

@@ -6,17 +6,17 @@ import { z } from "zod";
 
 const createSupplierSchema = z.object({
   name: z.string().min(1),
-  categoryId: z.string().optional(),    // Link to existing category
-  categoryName: z.string().optional(),  // Or create new category by name (hybrid)
+  categorySlugs: z.array(z.string()).optional(), // Category slugs to link
+  primaryCategory: z.string().optional(), // Primary category slug
   notes: z.string().optional(),
   email: z.string().email().optional(), // Initial contact method
-  phone: z.string().optional(),         // Initial contact method
+  phone: z.string().optional(), // Initial contact method
 });
 
 const updateSupplierSchema = z.object({
   name: z.string().min(1).optional(),
-  categoryId: z.string().optional(),
-  categoryName: z.string().optional(),
+  categorySlugs: z.array(z.string()).optional(),
+  primaryCategory: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -26,33 +26,6 @@ const addContactMethodSchema = z.object({
   label: z.string().optional(),
   isPrimary: z.boolean().default(false),
 });
-
-// Helper: slugify category name
-function slugify(name: string): string {
-  return name.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-}
-
-// Helper: get or create category by name (hybrid suggest + dedupe)
-async function getOrCreateCategory(userId: string, categoryName: string) {
-  const slug = slugify(categoryName);
-  if (!slug) return null;
-  
-  let category = await prisma.supplierCategory.findUnique({
-    where: { userId_slug: { userId, slug } },
-  });
-  
-  if (!category) {
-    category = await prisma.supplierCategory.create({
-      data: {
-        userId,
-        name: categoryName.trim(),
-        slug,
-      },
-    });
-  }
-  
-  return category;
-}
 
 const app = new Hono()
   // GET /api/suppliers - List all suppliers for the user
@@ -71,9 +44,12 @@ const app = new Hono()
     const suppliers = await prisma.supplier.findMany({
       where: { userId: user.id },
       include: {
-        category: true,
+        categories: {
+          include: { category: true },
+          orderBy: { isPrimary: "desc" },
+        },
         contactMethods: true,
-        _count: { select: { projectSuppliers: true, messages: true } }
+        _count: { select: { projectSuppliers: true, messages: true } },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -85,7 +61,7 @@ const app = new Hono()
   .get("/:id", async (c) => {
     const auth = getAuth(c);
     const supplierId = c.req.param("id");
-    
+
     if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
 
     const user = await prisma.user.findUnique({
@@ -97,7 +73,10 @@ const app = new Hono()
     const supplier = await prisma.supplier.findUnique({
       where: { id: supplierId },
       include: {
-        category: true,
+        categories: {
+          include: { category: true },
+          orderBy: { isPrimary: "desc" },
+        },
         contactMethods: true,
         projectSuppliers: {
           include: {
@@ -141,7 +120,7 @@ const app = new Hono()
     if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
 
     const data = c.req.valid("json");
-    
+
     let user = await prisma.user.findUnique({
       where: { clerkId: auth.userId },
     });
@@ -164,20 +143,10 @@ const app = new Hono()
       });
     }
 
-    // Resolve category: use categoryId, or create from categoryName (hybrid)
-    let categoryId: string | null = null;
-    if (data.categoryId) {
-      categoryId = data.categoryId;
-    } else if (data.categoryName) {
-      const category = await getOrCreateCategory(user.id, data.categoryName);
-      categoryId = category?.id || null;
-    }
-
-    // Create Supplier and ContactMethods
+    // Create Supplier
     const supplier = await prisma.supplier.create({
       data: {
         name: data.name,
-        categoryId,
         notes: data.notes,
         userId: user.id,
         contactMethods: {
@@ -187,20 +156,40 @@ const app = new Hono()
           ],
         },
       },
+    });
+
+    // Link categories
+    const categorySlugs = data.categorySlugs || [];
+    for (const slug of categorySlugs) {
+      const category = await prisma.supplierCategory.findUnique({ where: { slug } });
+      if (category) {
+        await prisma.supplierToCategory.create({
+          data: {
+            supplierId: supplier.id,
+            categoryId: category.id,
+            isPrimary: slug === data.primaryCategory,
+          },
+        });
+      }
+    }
+
+    // Fetch with categories
+    const result = await prisma.supplier.findUnique({
+      where: { id: supplier.id },
       include: {
-        category: true,
+        categories: { include: { category: true } },
         contactMethods: true,
       },
     });
 
-    return c.json(supplier, 201);
+    return c.json(result, 201);
   })
 
   // PATCH /api/suppliers/:id - Update a supplier
   .patch("/:id", zValidator("json", updateSupplierSchema), async (c) => {
     const auth = getAuth(c);
     const supplierId = c.req.param("id");
-    
+
     if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
 
     const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
@@ -214,24 +203,42 @@ const app = new Hono()
 
     const data = c.req.valid("json");
 
-    // Resolve category
-    let categoryId: string | undefined = undefined;
-    if (data.categoryId !== undefined) {
-      categoryId = data.categoryId;
-    } else if (data.categoryName) {
-      const category = await getOrCreateCategory(user.id, data.categoryName);
-      categoryId = category?.id;
-    }
-
-    const supplier = await prisma.supplier.update({
+    // Update basic fields
+    await prisma.supplier.update({
       where: { id: supplierId },
       data: {
         ...(data.name && { name: data.name }),
-        ...(categoryId !== undefined && { categoryId }),
         ...(data.notes !== undefined && { notes: data.notes }),
       },
+    });
+
+    // Update categories if provided
+    if (data.categorySlugs !== undefined) {
+      // Remove existing category links
+      await prisma.supplierToCategory.deleteMany({
+        where: { supplierId },
+      });
+
+      // Add new category links
+      for (const slug of data.categorySlugs) {
+        const category = await prisma.supplierCategory.findUnique({ where: { slug } });
+        if (category) {
+          await prisma.supplierToCategory.create({
+            data: {
+              supplierId,
+              categoryId: category.id,
+              isPrimary: slug === data.primaryCategory,
+            },
+          });
+        }
+      }
+    }
+
+    // Fetch updated supplier
+    const supplier = await prisma.supplier.findUnique({
+      where: { id: supplierId },
       include: {
-        category: true,
+        categories: { include: { category: true } },
         contactMethods: true,
       },
     });
@@ -243,7 +250,7 @@ const app = new Hono()
   .post("/:id/contacts", zValidator("json", addContactMethodSchema), async (c) => {
     const auth = getAuth(c);
     const supplierId = c.req.param("id");
-    
+
     if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
 
     const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
@@ -274,4 +281,3 @@ const app = new Hono()
   });
 
 export default app;
-

@@ -40,7 +40,6 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
     try {
         const supplier = await createSupplier({
             name: newVendor.name,
-            categoryName: newVendor.categoryName || undefined,
             email: newVendor.email || undefined,
         });
         
@@ -91,7 +90,11 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
                                 >
                                     <div className="flex flex-col">
                                         <span className="font-medium text-foreground">{supplier.name}</span>
-                                        <span className="text-xs text-muted-foreground">{supplier.category?.name || "No category"}</span>
+                                        <span className="text-xs text-muted-foreground">
+                                          {supplier.categories?.find(c => c.isPrimary)?.category?.name || 
+                                           supplier.categories?.[0]?.category?.name || 
+                                           "No category"}
+                                        </span>
                                     </div>
                                     {isLinking && <Loader2 className="h-4 w-4 animate-spin" />}
                                 </CommandItem>

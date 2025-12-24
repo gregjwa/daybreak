@@ -19,10 +19,16 @@ export interface BackfillRun {
   id: string;
   status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
   timeframeMonths: number;
+  eventContext: string | null;
   scannedMessages: number;
   discoveredContacts: number;
   createdCandidates: number;
   errorsCount: number;
+  // Enrichment phase
+  enrichmentStatus: "PENDING" | "RUNNING" | "COMPLETED";
+  enrichedCount: number;
+  autoImportedCount: number;
+  // Timestamps
   startedAt: string | null;
   completedAt: string | null;
   hasMorePages: boolean;
@@ -86,13 +92,18 @@ export function useBackfillStatus(runId: string | null) {
   });
 }
 
+interface StartBackfillParams {
+  timeframeMonths?: number;
+  eventContext?: string;
+}
+
 // Start backfill
 export function useStartBackfill() {
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (timeframeMonths: number = 6) => {
+    mutationFn: async (params: StartBackfillParams = {}) => {
       const token = await getToken();
       const res = await fetch(`${API_URL}/emails/backfill/start`, {
         method: "POST",
@@ -100,13 +111,16 @@ export function useStartBackfill() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ timeframeMonths }),
+        body: JSON.stringify({
+          timeframeMonths: params.timeframeMonths || 6,
+          eventContext: params.eventContext,
+        }),
       });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || "Failed to start backfill");
       }
-      return res.json() as Promise<{ success: boolean; runId: string; gmailQuery: string }>;
+      return res.json() as Promise<{ success: boolean; runId: string; gmailQuery: string; eventContext?: string }>;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["backfill", "active"] });
@@ -165,6 +179,43 @@ export function useCancelBackfill() {
     onSuccess: (_, runId) => {
       queryClient.invalidateQueries({ queryKey: ["backfill", runId] });
       queryClient.invalidateQueries({ queryKey: ["backfill", "active"] });
+    },
+  });
+}
+
+// Run AI enrichment on backfill results
+export function useBackfillEnrich() {
+  const { getToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (runId: string) => {
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/emails/backfill/${runId}/enrich`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to run enrichment");
+      }
+      return res.json() as Promise<{
+        success: boolean;
+        enriched: number;
+        imported: number;
+        dismissed: number;
+        needsReview: number;
+      }>;
+    },
+    onSuccess: (_, runId) => {
+      queryClient.invalidateQueries({ queryKey: ["backfill", runId] });
+      queryClient.invalidateQueries({ queryKey: ["backfill", "active"] });
+      queryClient.invalidateQueries({ queryKey: ["supplier-candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["suppliers"] });
     },
   });
 }

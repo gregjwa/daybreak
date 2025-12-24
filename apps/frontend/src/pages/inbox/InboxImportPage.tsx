@@ -15,6 +15,8 @@ import {
   Loader2,
   CheckCircle2,
   Building2,
+  ThumbsDown,
+  Star,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -22,12 +24,12 @@ import {
   useBackfillStatus,
   useBackfillTick,
   useCancelBackfill,
+  useBackfillEnrich,
 } from "@/api/useBackfill";
 import {
   useSupplierCandidates,
   useBulkAcceptCandidates,
   useBulkDismissCandidates,
-  useEnrichCandidates,
 } from "@/api/useSupplierCandidates";
 
 // Animated progress component
@@ -47,10 +49,20 @@ function AnimatedProgress({ value, className }: { value: number; className?: str
 }
 
 // Confidence badge
-function ConfidenceBadge({ confidence }: { confidence: number | null }) {
+function ConfidenceBadge({ confidence, isRelevant }: { confidence: number | null; isRelevant?: boolean | null }) {
   if (confidence === null) {
     return <Badge variant="outline" className="text-xs">—</Badge>;
   }
+  
+  if (isRelevant === false) {
+    return (
+      <Badge variant="outline" className="text-xs bg-slate-100 text-slate-500 border-slate-200 gap-1">
+        <ThumbsDown className="h-2.5 w-2.5" />
+        Not relevant
+      </Badge>
+    );
+  }
+
   const percent = Math.round(confidence * 100);
   const color =
     percent >= 80
@@ -66,6 +78,32 @@ function ConfidenceBadge({ confidence }: { confidence: number | null }) {
   );
 }
 
+// Category badges with primary indicator
+function CategoryBadges({ categories, primary }: { categories: string[]; primary?: string | null }) {
+  if (!categories || categories.length === 0) {
+    return <span className="text-muted-foreground italic">—</span>;
+  }
+
+  // Format slug to display name
+  const formatName = (slug: string) =>
+    slug.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {categories.map((cat) => (
+        <Badge
+          key={cat}
+          variant={cat === primary ? "default" : "secondary"}
+          className={cn("font-normal text-xs", cat === primary && "gap-0.5")}
+        >
+          {cat === primary && <Star className="h-2.5 w-2.5" />}
+          {formatName(cat)}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 export default function InboxImportPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -76,17 +114,25 @@ export default function InboxImportPage() {
   const { data: runStatus } = useBackfillStatus(runId);
   const tick = useBackfillTick();
   const cancelBackfill = useCancelBackfill();
+  const enrichBackfill = useBackfillEnrich();
 
   const { data: candidates, isLoading: loadingCandidates } = useSupplierCandidates("NEW");
   const bulkAccept = useBulkAcceptCandidates();
   const bulkDismiss = useBulkDismissCandidates();
-  const enrich = useEnrichCandidates();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [enrichmentStarted, setEnrichmentStarted] = useState(false);
 
-  // Auto-tick loop
+  // Filter to only show relevant candidates
+  const relevantCandidates = useMemo(() => {
+    if (!candidates) return [];
+    // Show candidates that are either not enriched yet, or are relevant
+    return candidates.filter((c) => c.isRelevant !== false);
+  }, [candidates]);
+
+  // Auto-tick loop for discovery phase
   useEffect(() => {
     if (!runId || !runStatus) return;
     if (runStatus.status !== "PENDING" && runStatus.status !== "RUNNING") return;
@@ -100,34 +146,48 @@ export default function InboxImportPage() {
     return () => clearTimeout(timer);
   }, [runId, runStatus?.status, tick.isPending, isProcessing]);
 
-  // Auto-select high confidence candidates
+  // Auto-trigger enrichment when discovery completes
   useEffect(() => {
-    if (!candidates) return;
-    const highConfidence = candidates.filter(
-      (c) => c.confidence !== null && c.confidence >= 0.7 && c.status === "NEW"
+    if (!runId || !runStatus) return;
+    if (runStatus.status !== "COMPLETED") return;
+    if (runStatus.enrichmentStatus !== "PENDING") return;
+    if (enrichmentStarted || enrichBackfill.isPending) return;
+
+    setEnrichmentStarted(true);
+    enrichBackfill.mutate(runId);
+  }, [runId, runStatus?.status, runStatus?.enrichmentStatus, enrichmentStarted, enrichBackfill.isPending]);
+
+  // Auto-select high confidence relevant candidates
+  useEffect(() => {
+    if (!relevantCandidates) return;
+    const highConfidence = relevantCandidates.filter(
+      (c) => c.confidence !== null && c.confidence >= 0.65 && c.isRelevant === true && c.status === "NEW"
     );
     setSelectedIds(new Set(highConfidence.map((c) => c.id)));
-  }, [candidates]);
+  }, [relevantCandidates]);
 
   const filteredCandidates = useMemo(() => {
-    if (!candidates) return [];
-    if (!search) return candidates;
+    if (!relevantCandidates) return [];
+    if (!search) return relevantCandidates;
     const lower = search.toLowerCase();
-    return candidates.filter(
+    return relevantCandidates.filter(
       (c) =>
         c.email.toLowerCase().includes(lower) ||
         c.domain.toLowerCase().includes(lower) ||
         c.displayName?.toLowerCase().includes(lower) ||
-        c.suggestedSupplierName?.toLowerCase().includes(lower)
+        c.suggestedSupplierName?.toLowerCase().includes(lower) ||
+        c.suggestedCategories?.some((cat) => cat.toLowerCase().includes(lower))
     );
-  }, [candidates, search]);
+  }, [relevantCandidates, search]);
 
-  const isRunning =
+  const isDiscovering =
     runStatus?.status === "PENDING" || runStatus?.status === "RUNNING";
-  const isComplete = runStatus?.status === "COMPLETED";
-  const progress = runStatus
+  const isEnriching = runStatus?.enrichmentStatus === "RUNNING" || enrichBackfill.isPending;
+  const isComplete = runStatus?.status === "COMPLETED" && runStatus?.enrichmentStatus === "COMPLETED";
+
+  const discoveryProgress = runStatus
     ? runStatus.hasMorePages
-      ? Math.min(90, (runStatus.scannedMessages / 500) * 100) // Estimate
+      ? Math.min(90, (runStatus.scannedMessages / 500) * 100)
       : 100
     : 0;
 
@@ -161,15 +221,6 @@ export default function InboxImportPage() {
     setSelectedIds(new Set());
   };
 
-  const handleEnrich = async () => {
-    const idsToEnrich = candidates
-      ?.filter((c) => c.confidence === null && c.status === "NEW")
-      .map((c) => c.id)
-      .slice(0, 20);
-    if (!idsToEnrich?.length) return;
-    await enrich.mutateAsync({ candidateIds: idsToEnrich, scrapeDomain: true });
-  };
-
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
@@ -181,15 +232,17 @@ export default function InboxImportPage() {
           <h1 className="text-lg font-display font-semibold">Import Suppliers</h1>
           {runStatus && (
             <p className="text-sm text-muted-foreground">
-              {isRunning
+              {isDiscovering
                 ? `Scanning... ${runStatus.scannedMessages} emails checked`
+                : isEnriching
+                ? `Analyzing ${runStatus.createdCandidates} contacts with AI...`
                 : isComplete
-                ? `Found ${runStatus.createdCandidates} potential suppliers`
+                ? `Found ${filteredCandidates.length} relevant suppliers`
                 : runStatus.status}
             </p>
           )}
         </div>
-        {isRunning && (
+        {isDiscovering && (
           <Button
             variant="outline"
             size="sm"
@@ -201,11 +254,10 @@ export default function InboxImportPage() {
         )}
       </header>
 
-      {/* Progress Section */}
-      {runStatus && isRunning && (
+      {/* Discovery Progress Section */}
+      {runStatus && isDiscovering && (
         <div className="px-6 py-8 border-b bg-gradient-to-b from-primary/5 to-transparent">
           <div className="max-w-xl mx-auto text-center space-y-6">
-            {/* Animated icon */}
             <div className="relative inline-flex">
               <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
               <div className="relative p-4 rounded-full bg-primary/10">
@@ -222,7 +274,7 @@ export default function InboxImportPage() {
               </p>
             </div>
 
-            <AnimatedProgress value={progress} className="max-w-md mx-auto" />
+            <AnimatedProgress value={discoveryProgress} className="max-w-md mx-auto" />
 
             <div className="flex justify-center gap-8 text-sm">
               <div className="text-center">
@@ -235,7 +287,45 @@ export default function InboxImportPage() {
                 <div className="text-2xl font-semibold text-primary">
                   {runStatus.createdCandidates}
                 </div>
-                <div className="text-muted-foreground">Suppliers found</div>
+                <div className="text-muted-foreground">Contacts found</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Enrichment Progress Section */}
+      {runStatus && !isDiscovering && isEnriching && (
+        <div className="px-6 py-8 border-b bg-gradient-to-b from-violet-500/5 to-transparent">
+          <div className="max-w-xl mx-auto text-center space-y-6">
+            <div className="relative inline-flex">
+              <div className="absolute inset-0 rounded-full bg-violet-500/20 animate-ping" />
+              <div className="relative p-4 rounded-full bg-violet-500/10">
+                <Sparkles className="h-8 w-8 text-violet-500 animate-pulse" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-xl font-display font-medium">
+                AI is analyzing your contacts...
+              </h2>
+              <p className="text-muted-foreground">
+                Identifying suppliers and categorizing them based on your event types
+              </p>
+            </div>
+
+            <div className="flex justify-center gap-8 text-sm">
+              <div className="text-center">
+                <div className="text-2xl font-semibold text-violet-600">
+                  {runStatus.enrichedCount || 0}
+                </div>
+                <div className="text-muted-foreground">Analyzed</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-semibold text-emerald-600">
+                  {runStatus.autoImportedCount || 0}
+                </div>
+                <div className="text-muted-foreground">Auto-imported</div>
               </div>
             </div>
           </div>
@@ -243,7 +333,7 @@ export default function InboxImportPage() {
       )}
 
       {/* Review Section */}
-      {(isComplete || (candidates && candidates.length > 0)) && (
+      {(isComplete || (filteredCandidates && filteredCandidates.length > 0 && !isDiscovering)) && (
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Toolbar */}
           <div className="px-6 py-3 border-b flex items-center gap-4 bg-muted/30">
@@ -260,20 +350,6 @@ export default function InboxImportPage() {
             <span className="text-sm text-muted-foreground">
               {selectedIds.size} selected
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleEnrich}
-              disabled={enrich.isPending}
-              className="gap-1"
-            >
-              {enrich.isPending ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Sparkles className="h-3 w-3" />
-              )}
-              Enrich
-            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -337,7 +413,7 @@ export default function InboxImportPage() {
                       Email
                     </th>
                     <th className="text-left px-3 py-2 font-medium text-muted-foreground">
-                      Category
+                      Categories
                     </th>
                     <th className="text-left px-3 py-2 font-medium text-muted-foreground">
                       Confidence
@@ -378,16 +454,16 @@ export default function InboxImportPage() {
                         {candidate.email}
                       </td>
                       <td className="px-3 py-2">
-                        {candidate.suggestedCategoryName ? (
-                          <Badge variant="secondary" className="font-normal">
-                            {candidate.suggestedCategoryName}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground italic">—</span>
-                        )}
+                        <CategoryBadges
+                          categories={candidate.suggestedCategories || []}
+                          primary={candidate.primaryCategory}
+                        />
                       </td>
                       <td className="px-3 py-2">
-                        <ConfidenceBadge confidence={candidate.confidence} />
+                        <ConfidenceBadge
+                          confidence={candidate.confidence}
+                          isRelevant={candidate.isRelevant}
+                        />
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
                         {candidate.messageCount}
@@ -414,4 +490,3 @@ export default function InboxImportPage() {
     </div>
   );
 }
-

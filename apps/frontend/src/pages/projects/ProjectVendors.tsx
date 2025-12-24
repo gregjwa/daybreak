@@ -61,11 +61,15 @@ export default function ProjectVendors() {
             const supplierData = ps.supplier as any; // Type assertion for messages field
             const lastMessage = supplierData?.messages?.[0] as LastMessage | undefined;
             
+            // Get primary category or first category
+            const primaryCat = supplierData?.categories?.find((c: any) => c.isPrimary)?.category?.name;
+            const firstCat = supplierData?.categories?.[0]?.category?.name;
+            
             return {
                 id: ps.id,
                 supplierId: ps.supplierId,
                 name: ps.supplier?.name || "Unknown",
-                category: ps.supplier?.category?.name || "Uncategorized",
+                category: primaryCat || firstCat || "Uncategorized",
                 role: ps.role,
                 status: ps.status,
                 quoteAmount: ps.quoteAmount,
