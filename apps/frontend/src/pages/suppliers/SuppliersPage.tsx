@@ -40,14 +40,19 @@ export default function SuppliersPage() {
     return suppliers.map(s => {
       const primaryCat = s.categories?.find(c => c.isPrimary)?.category?.name;
       const firstCat = s.categories?.[0]?.category?.name;
+      
+      // Get primary email from contacts -> contactMethods
+      const allContactMethods = s.contacts?.flatMap(c => c.contactMethods || []) || [];
+      const primaryEmail = allContactMethods.find(cm => cm.type === "EMAIL" && cm.isPrimary)?.value
+        || allContactMethods.find(cm => cm.type === "EMAIL")?.value;
+      
       return {
         id: s.id,
         name: s.name,
         category: primaryCat || firstCat || null,
         projectCount: s._count?.projectSuppliers || 0,
         messageCount: s._count?.messages || 0,
-        primaryEmail: s.contactMethods.find(c => c.type === "EMAIL" && c.isPrimary)?.value 
-          || s.contactMethods.find(c => c.type === "EMAIL")?.value,
+        primaryEmail,
       };
     });
   }, [suppliers]);
@@ -129,9 +134,13 @@ export default function SuppliersPage() {
 
   const handleCreate = async () => {
     if (!newSupplier.name.trim()) return;
+    const email = newSupplier.email.trim();
     await createSupplier.mutateAsync({
       name: newSupplier.name.trim(),
-      email: newSupplier.email.trim() || undefined,
+      contact: email ? {
+        name: newSupplier.name.trim(),
+        email,
+      } : undefined,
     });
     setNewSupplier({ name: "", categoryName: "", email: "" });
     setIsCreateOpen(false);

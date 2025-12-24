@@ -38,9 +38,13 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+        const email = newVendor.email?.trim();
         const supplier = await createSupplier({
             name: newVendor.name,
-            email: newVendor.email || undefined,
+            contact: email ? {
+              name: newVendor.name,
+              email,
+            } : undefined,
         });
         
         // Auto link after create

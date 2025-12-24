@@ -54,19 +54,24 @@ export default function SupplierDetailPage() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState("");
 
+  // Flatten all contact methods from all contacts
+  const allContactMethods = useMemo(() => {
+    return supplier?.contacts?.flatMap(c => c.contactMethods || []) || [];
+  }, [supplier]);
+
   const primaryEmail = useMemo(() => {
     return (
-      supplier?.contactMethods.find((c) => c.type === "EMAIL" && c.isPrimary)?.value ||
-      supplier?.contactMethods.find((c) => c.type === "EMAIL")?.value
+      allContactMethods.find((c) => c.type === "EMAIL" && c.isPrimary)?.value ||
+      allContactMethods.find((c) => c.type === "EMAIL")?.value
     );
-  }, [supplier]);
+  }, [allContactMethods]);
 
   const primaryPhone = useMemo(() => {
     return (
-      supplier?.contactMethods.find((c) => c.type === "PHONE" && c.isPrimary)?.value ||
-      supplier?.contactMethods.find((c) => c.type === "PHONE")?.value
+      allContactMethods.find((c) => c.type === "PHONE" && c.isPrimary)?.value ||
+      allContactMethods.find((c) => c.type === "PHONE")?.value
     );
-  }, [supplier]);
+  }, [allContactMethods]);
 
   const handleSaveName = async () => {
     if (!editName.trim() || !supplierId) return;
@@ -199,32 +204,39 @@ export default function SupplierDetailPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Left Column - Details */}
             <div className="lg:col-span-1 space-y-6">
-              {/* Contact Methods */}
+              {/* Contacts */}
               <section className="rounded-lg border bg-card p-5">
                 <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">
-                  Contact Methods
+                  Contacts
                 </h3>
-                {supplier.contactMethods.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No contact methods</p>
+                {!supplier.contacts || supplier.contacts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No contacts</p>
                 ) : (
-                  <div className="space-y-3">
-                    {supplier.contactMethods.map((cm) => (
-                      <div key={cm.id} className="flex items-center gap-3">
-                        <div className="p-2 rounded-md bg-muted">
-                          {cm.type === "EMAIL" ? (
-                            <EnvelopeSimple className="h-4 w-4 text-muted-foreground" />
-                          ) : cm.type === "PHONE" ? (
-                            <Phone className="h-4 w-4 text-muted-foreground" />
-                          ) : (
-                            <ChatCircleText className="h-4 w-4 text-muted-foreground" />
+                  <div className="space-y-4">
+                    {supplier.contacts.map((contact) => (
+                      <div key={contact.id} className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{contact.name}</span>
+                          {contact.isPrimary && (
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">Primary</Badge>
+                          )}
+                          {contact.role && (
+                            <span className="text-xs text-muted-foreground">• {contact.role}</span>
                           )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium truncate">{cm.value}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {cm.label || cm.type}
-                            {cm.isPrimary && " • Primary"}
-                          </div>
+                        <div className="space-y-1 pl-2">
+                          {contact.contactMethods.map((cm) => (
+                            <div key={cm.id} className="flex items-center gap-2 text-sm">
+                              {cm.type === "EMAIL" ? (
+                                <EnvelopeSimple className="h-3.5 w-3.5 text-muted-foreground" />
+                              ) : cm.type === "PHONE" ? (
+                                <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                              ) : (
+                                <ChatCircleText className="h-3.5 w-3.5 text-muted-foreground" />
+                              )}
+                              <span className="text-muted-foreground">{cm.value}</span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     ))}

@@ -13,6 +13,15 @@ export interface ContactMethod {
   isPrimary: boolean;
 }
 
+export interface SupplierContact {
+  id: string;
+  name: string;
+  email: string;
+  role?: string | null;
+  isPrimary: boolean;
+  contactMethods: ContactMethod[];
+}
+
 export interface SupplierToCategory {
   id: string;
   supplierId: string;
@@ -24,9 +33,11 @@ export interface SupplierToCategory {
 export interface Supplier {
   id: string;
   name: string;
+  domain?: string | null;
+  isPersonalDomain: boolean;
   notes?: string | null;
   categories: SupplierToCategory[];
-  contactMethods: ContactMethod[];
+  contacts: SupplierContact[];
   _count?: {
     projectSuppliers?: number;
     messages?: number;
@@ -55,6 +66,12 @@ export interface SupplierDetail extends Supplier {
     sentAt: string;
     project?: { id: string; name: string } | null;
   }[];
+}
+
+export interface CreateSupplierContact {
+  name: string;
+  email: string;
+  role?: string;
 }
 
 async function fetcher<T>(url: string, token: string | null): Promise<T> {
@@ -87,11 +104,12 @@ export function useSupplier(supplierId: string | undefined) {
 
 export interface CreateSupplierData {
   name: string;
+  domain?: string;
+  isPersonalDomain?: boolean;
   categorySlugs?: string[];
   primaryCategory?: string;
   notes?: string;
-  email?: string;
-  phone?: string;
+  contact?: CreateSupplierContact;
 }
 
 export function useCreateSupplier() {

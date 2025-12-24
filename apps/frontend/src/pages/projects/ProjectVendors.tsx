@@ -65,6 +65,9 @@ export default function ProjectVendors() {
             const primaryCat = supplierData?.categories?.find((c: any) => c.isPrimary)?.category?.name;
             const firstCat = supplierData?.categories?.[0]?.category?.name;
             
+            // Get contact methods from contacts
+            const allContactMethods = supplierData?.contacts?.flatMap((c: any) => c.contactMethods || []) || [];
+            
             return {
                 id: ps.id,
                 supplierId: ps.supplierId,
@@ -74,7 +77,7 @@ export default function ProjectVendors() {
                 status: ps.status,
                 quoteAmount: ps.quoteAmount,
                 lastMessage,
-                contactMethods: ps.supplier?.contactMethods
+                contactMethods: allContactMethods
             };
         });
     }, [project]);

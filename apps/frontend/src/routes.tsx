@@ -16,6 +16,14 @@ const SupplierDetailPage = lazy(() => import("@/pages/suppliers/SupplierDetailPa
 const InboxSettingsPage = lazy(() => import("@/pages/inbox/InboxSettingsPage"));
 const InboxImportPage = lazy(() => import("@/pages/inbox/InboxImportPage"));
 
+// Lazy load dev pages
+const DevLayout = lazy(() => import("@/pages/dev/DevLayout"));
+const DevIndexPage = lazy(() => import("@/pages/dev/DevIndexPage"));
+const ExperimentsPage = lazy(() => import("@/pages/dev/ExperimentsPage"));
+const EmailMatchingPage = lazy(() => import("@/pages/dev/EmailMatchingPage"));
+const StatusUpdatesPage = lazy(() => import("@/pages/dev/StatusUpdatesPage"));
+const DataInspectorPage = lazy(() => import("@/pages/dev/DataInspectorPage"));
+
 // Loading fallback
 const PageLoader = () => (
   <div className="flex h-full items-center justify-center">
@@ -108,6 +116,56 @@ export const router = createBrowserRouter([
   {
     path: "/invite/:token",
     element: <InviteLandingPage />,
+  },
+  {
+    path: "/dev",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <DevLayout />
+      </Suspense>
+    ),
+    children: [
+      {
+        path: "",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <DevIndexPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "experiments",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <ExperimentsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "email-matching",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <EmailMatchingPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "status-updates",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <StatusUpdatesPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "data",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <DataInspectorPage />
+          </Suspense>
+        ),
+      },
+    ],
   },
 ]);
 
