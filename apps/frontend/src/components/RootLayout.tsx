@@ -12,7 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { fetchOrganizations } from "@/api/useOrganizations";
 import { Sheet, SheetContent, SheetTrigger } from "@/ui/sheet";
 import { Button } from "@/ui/button";
-import { Menu, Calendar, Users, Home, FolderKanban, Building2 } from "lucide-react";
+import { Menu, Calendar, Users, Home, FolderKanban, Building2, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGmailWatch } from "@/hooks/useGmailWatch";
 
@@ -60,6 +60,9 @@ const Sidebar = ({ className }: { className?: string }) => {
       <div className="flex-1 py-6 px-4 space-y-1">
         <NavLink to="/" icon={Home}>
           Dashboard
+        </NavLink>
+        <NavLink to="/inbox" icon={Inbox}>
+          Inbox
         </NavLink>
         <NavLink to="/projects" icon={FolderKanban}>
           Projects

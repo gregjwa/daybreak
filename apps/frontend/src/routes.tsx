@@ -12,6 +12,10 @@ import ProjectList from "@/pages/projects/ProjectList";
 const SuppliersPage = lazy(() => import("@/pages/suppliers/SuppliersPage"));
 const SupplierDetailPage = lazy(() => import("@/pages/suppliers/SupplierDetailPage"));
 
+// Lazy load inbox pages
+const InboxSettingsPage = lazy(() => import("@/pages/inbox/InboxSettingsPage"));
+const InboxImportPage = lazy(() => import("@/pages/inbox/InboxImportPage"));
+
 // Loading fallback
 const PageLoader = () => (
   <div className="flex h-full items-center justify-center">
@@ -80,6 +84,22 @@ export const router = createBrowserRouter([
         element: (
           <Suspense fallback={<PageLoader />}>
             <SupplierDetailPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "inbox",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <InboxSettingsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "inbox/import",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <InboxImportPage />
           </Suspense>
         ),
       },

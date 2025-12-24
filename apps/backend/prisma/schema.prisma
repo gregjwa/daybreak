@@ -85,10 +85,12 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  projects           Project[]
-  suppliers          Supplier[]
-  supplierCategories SupplierCategory[]
-  gmailWatch         GmailWatch?
+  projects            Project[]
+  suppliers           Supplier[]
+  supplierCategories  SupplierCategory[]
+  gmailWatch          GmailWatch?
+  backfillRuns        BackfillRun[]
+  supplierCandidates  SupplierCandidate[]
 
   @@map("users")
 }
@@ -121,9 +123,10 @@ model Supplier {
   categoryId String?
   category   SupplierCategory? @relation(fields: [categoryId], references: [id])
 
-  contactMethods   ContactMethod[]
-  projectSuppliers ProjectSupplier[]
-  messages         Message[] // Aggregate messages for the supplier
+  contactMethods     ContactMethod[]
+  projectSuppliers   ProjectSupplier[]
+  messages           Message[] // Aggregate messages for the supplier
+  supplierCandidates SupplierCandidate[] // Candidates that became this supplier
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -225,4 +228,110 @@ model GmailWatch {
   updatedAt    DateTime @updatedAt
 
   @@map("gmail_watches")
+}
+
+// --- Inbox Backfill Models ---
+
+model BackfillRun {
+  id                 String   @id @default(cuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status             String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED, CANCELLED
+  timeframeMonths    Int      @default(6)
+  gmailQuery         String   // e.g. "in:sent newer_than:6m"
+  nextPageToken      String?  // For resuming Gmail pagination
+  
+  // Progress counters
+  scannedMessages    Int      @default(0)
+  discoveredContacts Int      @default(0)
+  createdCandidates  Int      @default(0)
+  errorsCount        Int      @default(0)
+
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("backfill_runs")
+}
+
+model SupplierCandidate {
+  id                    String   @id @default(cuid())
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  email                 String   // Normalized email
+  domain                String   // Domain extracted from email
+  displayName           String?  // Best-effort display name from email header
+
+  source                String   @default("GMAIL_SENT") // GMAIL_SENT, MANUAL, etc.
+  status                String   @default("NEW") // NEW, ACCEPTED, DISMISSED, MERGED
+
+  // Stats from scan
+  messageCount          Int      @default(1)
+  firstSeenAt           DateTime @default(now())
+  lastSeenAt            DateTime @default(now())
+
+  // AI suggestions
+  suggestedSupplierName String?
+  suggestedCategoryName String?
+  confidence            Float?   // 0-1
+  enrichmentJson        Json?    // Raw enrichment result
+
+  // If accepted, link to created supplier
+  supplierId            String?
+  supplier              Supplier? @relation(fields: [supplierId], references: [id])
+
+  enrichmentJobs        SupplierEnrichmentJob[]
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([userId, email])
+  @@index([userId, status])
+  @@index([domain])
+  @@map("supplier_candidates")
+}
+
+model SupplierEnrichmentJob {
+  id            String   @id @default(cuid())
+  userId        String
+  candidateId   String
+  candidate     SupplierCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  provider      String   // openai, anthropic
+  model         String   // gpt-4o-mini, etc.
+  promptVersion String   @default("v1")
+  inputHash     String   // Hash of input data for caching
+  
+  resultJson    Json?
+  confidence    Float?
+  errorMessage  String?
+
+  createdAt     DateTime @default(now())
+
+  @@index([inputHash])
+  @@map("supplier_enrichment_jobs")
+}
+
+// Global domain info cache (shared across users for efficiency)
+model DomainInfo {
+  id            String   @id @default(cuid())
+  domain        String   @unique // e.g. "floristshop.com"
+  
+  // Scraped/enriched data
+  title         String?
+  description   String?
+  industry      String?
+  services      String?
+  
+  // Enrichment metadata
+  lastFetchedAt DateTime?
+  fetchError    String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("domain_info")
 }
