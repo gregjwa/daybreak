@@ -9,7 +9,7 @@ import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/ui/dialog";
 import { Label } from "@/ui/label";
-import { Plus, Search, Users } from "lucide-react";
+import { MagnifyingGlass, Plus, UsersThree } from "@phosphor-icons/react";
 import { Avatar, AvatarFallback } from "@/ui/avatar";
 import { Badge } from "@/ui/badge";
 import { cn } from "@/lib/utils";
@@ -152,15 +152,15 @@ export default function SuppliersPage() {
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-primary/10 rounded-lg">
-              <Users className="h-5 w-5 text-primary" />
+              <UsersThree className="h-5 w-5 text-primary" weight="bold" />
             </div>
             <div>
-              <h1 className="text-xl font-display font-semibold tracking-tight">Suppliers</h1>
+              <h1 className="text-xl font-semibold tracking-tight">Suppliers</h1>
               <p className="text-sm text-muted-foreground">{rows.length} total</p>
             </div>
           </div>
           <Button onClick={() => setIsCreateOpen(true)} size="sm" className="gap-2">
-            <Plus className="h-4 w-4" />
+            <Plus className="h-4 w-4" weight="bold" />
             Add Supplier
           </Button>
         </div>
@@ -168,7 +168,7 @@ export default function SuppliersPage() {
         {/* Search + Category Tabs */}
         <div className="mt-5 flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -199,7 +199,7 @@ export default function SuppliersPage() {
       <main className="flex-1 p-6 overflow-y-auto">
         {filteredRows.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-center">
-            <Users className="h-12 w-12 text-muted-foreground/30 mb-4" />
+            <UsersThree className="h-12 w-12 text-muted-foreground/30 mb-4" />
             <h3 className="font-medium text-foreground mb-1">No suppliers found</h3>
             <p className="text-sm text-muted-foreground">
               {search ? "Try a different search term" : "Add your first supplier to get started"}

@@ -5,7 +5,7 @@ import { DataTable } from "@/components/data-table/DataTable";
 import { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/ui/button";
 import { InteractiveCell, StatusCell } from "@/components/data-table/Cells";
-import { Plus, Filter, LayoutGrid, Mail } from "lucide-react";
+import { EnvelopeSimple, FunnelSimple, Plus, SquaresFour } from "@phosphor-icons/react";
 import { Avatar, AvatarFallback } from "@/ui/avatar";
 import { AddVendorDialog } from "./AddVendorDialog"; 
 import { cn } from "@/lib/utils";
@@ -140,7 +140,7 @@ export default function ProjectVendors() {
                 return (
                     <InteractiveCell className="text-foreground">
                         <div className="flex items-center gap-2">
-                            <Mail className={cn(
+                            <EnvelopeSimple className={cn(
                                 "h-3.5 w-3.5 flex-shrink-0",
                                 isInbound ? "text-blue-500" : "text-emerald-500"
                             )} />
@@ -169,14 +169,14 @@ export default function ProjectVendors() {
                     <span>{project?.name}</span>
                 </div>
                 <div className="flex justify-between items-end">
-                    <h1 className="text-3xl font-display font-medium text-foreground tracking-tight">Vendors</h1>
+                    <h1 className="text-3xl font-medium text-foreground tracking-tight">Vendors</h1>
                     <div className="flex gap-2">
                          <Button variant="outline" size="sm" className="h-8 gap-2">
-                            <Filter className="h-4 w-4" />
+                            <FunnelSimple className="h-4 w-4" />
                             Filter
                         </Button>
                         <Button variant="outline" size="sm" className="h-8 gap-2">
-                            <LayoutGrid className="h-4 w-4" />
+                            <SquaresFour className="h-4 w-4" />
                             View
                         </Button>
                     </div>
@@ -235,7 +235,7 @@ export default function ProjectVendors() {
                         onClick={() => setIsAddOpen(true)}
                         className="flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors px-4 py-2 mt-2 -ml-4 rounded-md hover:bg-surface-hover w-full md:w-auto"
                     >
-                        <Plus className="h-4 w-4" />
+                        <Plus className="h-4 w-4" weight="bold" />
                         Add vendor
                     </button>
                 </section>

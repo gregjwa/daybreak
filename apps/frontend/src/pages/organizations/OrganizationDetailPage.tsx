@@ -34,11 +34,9 @@ import { Skeleton } from "@/ui/skeleton";
 import {
   Plus,
   ArrowLeft,
-  Mail,
   Copy,
-  Trash2,
-  MoreVertical,
-} from "lucide-react";
+} from "@phosphor-icons/react";
+import { DotsThreeVertical, EnvelopeSimple, Trash } from "@phosphor-icons/react";
 import {
   Dialog,
   DialogContent,
@@ -186,7 +184,7 @@ function OrganizationActions({ orgId }: { orgId: string }) {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="icon">
-            <MoreVertical className="h-4 w-4" />
+            <DotsThreeVertical className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -194,7 +192,7 @@ function OrganizationActions({ orgId }: { orgId: string }) {
           <DropdownMenuSeparator />
           <AlertDialogTrigger asChild>
             <DropdownMenuItem className="text-destructive focus:text-destructive">
-              <Trash2 className="mr-2 h-4 w-4" />
+              <Trash className="mr-2 h-4 w-4" />
               Delete Organization
             </DropdownMenuItem>
           </AlertDialogTrigger>
@@ -465,7 +463,7 @@ function InvitesTab({
         >
           <DialogTrigger asChild>
             <Button size="sm">
-              <Mail className="mr-2 h-4 w-4" />
+              <EnvelopeSimple className="mr-2 h-4 w-4" />
               Create Invite
             </Button>
           </DialogTrigger>

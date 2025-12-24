@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useProjects, useCreateProject } from "@/api/useProjects";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/ui/card";
-import { Plus, ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, CircleNotch, Plus } from "@phosphor-icons/react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/ui/dialog";
 import { Input } from "@/ui/input";
 import { Label } from "@/ui/label";
@@ -27,17 +27,17 @@ const ProjectList = () => {
         });
     };
 
-    if (isLoading) return <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-muted-foreground" /></div>;
+    if (isLoading) return <div className="p-8 flex justify-center"><CircleNotch className="animate-spin text-muted-foreground" /></div>;
 
     return (
         <div className="p-8 max-w-6xl mx-auto space-y-8">
             <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-3xl font-display font-medium tracking-tight">Projects</h1>
+                    <h1 className="text-3xl font-medium tracking-tight">Projects</h1>
                     <p className="text-muted-foreground mt-1">Manage your events and vendors</p>
                 </div>
                 <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
-                    <Plus className="h-4 w-4" />
+                    <Plus className="h-4 w-4" weight="bold" />
                     New Project
                 </Button>
             </div>
@@ -54,7 +54,7 @@ const ProjectList = () => {
                         <Card key={project.id} className="group hover:border-primary/20 transition-all cursor-pointer bg-surface-card shadow-sm hover:shadow-md">
                             <Link to={`/projects/${project.id}/vendors`} className="block h-full">
                                 <CardHeader>
-                                    <CardTitle className="font-display text-xl group-hover:text-primary transition-colors">
+                                    <CardTitle className="text-xl group-hover:text-primary transition-colors">
                                         {project.name}
                                     </CardTitle>
                                     <CardDescription>{project.type || "Event"}</CardDescription>
@@ -101,7 +101,7 @@ const ProjectList = () => {
                         <DialogFooter>
                             <Button type="button" variant="ghost" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
                             <Button type="submit" disabled={isCreating}>
-                                {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                {isCreating && <CircleNotch className="mr-2 h-4 w-4 animate-spin" />}
                                 Create Project
                             </Button>
                         </DialogFooter>

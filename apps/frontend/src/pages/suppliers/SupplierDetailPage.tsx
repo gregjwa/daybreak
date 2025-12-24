@@ -7,16 +7,16 @@ import { Badge } from "@/ui/badge";
 import { Avatar, AvatarFallback } from "@/ui/avatar";
 import {
   ArrowLeft,
-  Mail,
+  EnvelopeSimple,
   Phone,
-  Building2,
-  Calendar,
-  MessageSquare,
-  Edit2,
+  Buildings,
+  CalendarBlank,
+  ChatCircleText,
+  PencilSimple,
   Check,
   X,
-  ExternalLink,
-} from "lucide-react";
+  ArrowSquareOut,
+} from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 
 // Helper: format relative time
@@ -115,7 +115,7 @@ export default function SupplierDetailPage() {
           {/* Profile Header */}
           <div className="flex items-start gap-6 mb-8">
             <Avatar className="h-20 w-20 rounded-xl">
-              <AvatarFallback className="rounded-xl text-2xl font-display font-semibold bg-primary/10 text-primary">
+              <AvatarFallback className="rounded-xl text-2xl font-semibold bg-primary/10 text-primary">
                 {supplier.name.substring(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
@@ -127,7 +127,7 @@ export default function SupplierDetailPage() {
                   <Input
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    className="text-2xl font-display font-semibold h-10 max-w-md"
+                    className="text-2xl font-semibold h-10 max-w-md"
                     autoFocus
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleSaveName();
@@ -147,10 +147,10 @@ export default function SupplierDetailPage() {
                     setEditName(supplier.name);
                     setIsEditingName(true);
                   }}
-                  className="text-2xl font-display font-semibold tracking-tight mb-2 cursor-pointer hover:text-primary transition-colors inline-flex items-center gap-2 group"
+                  className="text-2xl font-semibold tracking-tight mb-2 cursor-pointer hover:text-primary transition-colors inline-flex items-center gap-2 group"
                 >
                   {supplier.name}
-                  <Edit2 className="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" />
+                  <PencilSimple className="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" />
                 </h1>
               )}
 
@@ -178,7 +178,7 @@ export default function SupplierDetailPage() {
                     href={`mailto:${primaryEmail}`}
                     className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    <Mail className="h-4 w-4" />
+                    <EnvelopeSimple className="h-4 w-4" />
                     {primaryEmail}
                   </a>
                 )}
@@ -212,11 +212,11 @@ export default function SupplierDetailPage() {
                       <div key={cm.id} className="flex items-center gap-3">
                         <div className="p-2 rounded-md bg-muted">
                           {cm.type === "EMAIL" ? (
-                            <Mail className="h-4 w-4 text-muted-foreground" />
+                            <EnvelopeSimple className="h-4 w-4 text-muted-foreground" />
                           ) : cm.type === "PHONE" ? (
                             <Phone className="h-4 w-4 text-muted-foreground" />
                           ) : (
-                            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                            <ChatCircleText className="h-4 w-4 text-muted-foreground" />
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -265,7 +265,7 @@ export default function SupplierDetailPage() {
                         className="flex items-center gap-4 px-5 py-4 hover:bg-muted/50 transition-colors group"
                       >
                         <div className="p-2 rounded-md bg-muted">
-                          <Building2 className="h-4 w-4 text-muted-foreground" />
+                          <Buildings className="h-4 w-4 text-muted-foreground" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-sm group-hover:text-primary transition-colors">
@@ -276,7 +276,7 @@ export default function SupplierDetailPage() {
                             {ps.project.date && (
                               <>
                                 <span>•</span>
-                                <Calendar className="h-3 w-3" />
+                                <CalendarBlank className="h-3 w-3" />
                                 <span>{formatDate(ps.project.date)}</span>
                               </>
                             )}
@@ -295,7 +295,7 @@ export default function SupplierDetailPage() {
                           >
                             {ps.status}
                           </Badge>
-                          <ExternalLink className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          <ArrowSquareOut className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                         </div>
                       </Link>
                     ))}
@@ -325,7 +325,7 @@ export default function SupplierDetailPage() {
                               msg.direction === "INBOUND" ? "bg-blue-50" : "bg-emerald-50"
                             )}
                           >
-                            <Mail
+                            <EnvelopeSimple
                               className={cn(
                                 "h-3.5 w-3.5",
                                 msg.direction === "INBOUND" ? "text-blue-600" : "text-emerald-600"

@@ -11,6 +11,7 @@
   /* Fonts */
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
 
   /* Extended semantic surfaces (optional, but useful for consistent layout styling) */
   --color-surface-canvas: var(--surface-canvas);
@@ -90,6 +91,15 @@
 
 @utility font-mono {
   font-family: var(--font-mono);
+}
+
+@utility font-display {
+  font-family: var(--font-display);
+}
+
+@utility text-numeric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 

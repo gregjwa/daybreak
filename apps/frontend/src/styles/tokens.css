@@ -8,11 +8,11 @@
   --radius: 0.625rem; /* 10px */
 
   /* Typography */
-  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system,
+  --font-display: "Lora", ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --font-sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace,
-    SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
 
   /* Surfaces (Attio-ish: very light, cool-neutral) */
   --background: oklch(0.985 0.003 255);
@@ -24,8 +24,8 @@
   --popover: oklch(1 0 0);
   --popover-foreground: var(--foreground);
 
-  /* Brand / primary (clear CTA blue) */
-  --primary: oklch(0.57 0.16 255);
+  /* Brand / primary (orchid/berry — modern, characterful, clear CTA) */
+  --primary: oklch(0.53 0.2 330);
   --primary-foreground: oklch(0.985 0 0);
 
   /* Neutrals */
@@ -87,7 +87,7 @@
   --popover: oklch(0.19 0.01 255);
   --popover-foreground: var(--foreground);
 
-  --primary: oklch(0.72 0.14 255);
+  --primary: oklch(0.72 0.17 330);
   --primary-foreground: oklch(0.16 0.01 255);
 
   --secondary: oklch(0.24 0.01 255);

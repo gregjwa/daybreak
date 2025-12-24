@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/
 import { Badge } from "@/ui/badge";
 import { Label } from "@/ui/label";
 import { Textarea } from "@/ui/textarea";
-import { Inbox, Mail, Sparkles, ArrowRight, Check, Loader2 } from "lucide-react";
+import { ArrowRight, Check, CircleNotch, EnvelopeSimple, Inbox, Sparkle } from "@phosphor-icons/react";
 import { useActiveBackfill, useStartBackfill } from "@/api/useBackfill";
 import { useSupplierCandidates } from "@/api/useSupplierCandidates";
 
@@ -34,10 +34,10 @@ export default function InboxSettingsPage() {
       <header className="px-6 py-5 border-b bg-background">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-primary/10 rounded-lg">
-            <Inbox className="h-5 w-5 text-primary" />
+            <Inbox className="h-5 w-5 text-primary" weight="bold" />
           </div>
           <div>
-            <h1 className="text-xl font-display font-semibold tracking-tight">Inbox</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Inbox</h1>
             <p className="text-sm text-muted-foreground">Manage your email connection and imports</p>
           </div>
         </div>
@@ -76,7 +76,7 @@ export default function InboxSettingsPage() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base font-medium flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <CircleNotch className="h-4 w-4 animate-spin" />
                     Import in Progress
                   </CardTitle>
                 </div>
@@ -97,7 +97,7 @@ export default function InboxSettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Mail className="h-5 w-5" />
+                  <EnvelopeSimple className="h-5 w-5" />
                   Import Suppliers from Email
                 </CardTitle>
                 <CardDescription>
@@ -170,12 +170,12 @@ export default function InboxSettingsPage() {
                 >
                   {startBackfill.isPending ? (
                     <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <CircleNotch className="h-4 w-4 animate-spin" />
                       Starting...
                     </>
                   ) : (
                     <>
-                      <Sparkles className="h-4 w-4" />
+                      <Sparkle className="h-4 w-4" weight="fill" />
                       Start Import
                     </>
                   )}

@@ -12,7 +12,7 @@ import {
   CardTitle,
 } from "@/ui/card";
 import { Skeleton } from "@/ui/skeleton";
-import { CheckCircle2, XCircle, ArrowRight } from "lucide-react";
+import { ArrowRight, CheckCircle, XCircle } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 export default function InviteLandingPage() {
@@ -79,7 +79,7 @@ export default function InviteLandingPage() {
         <Card className="w-full max-w-md text-center border-destructive/50 bg-destructive/5">
           <CardHeader>
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 mb-4">
-              <XCircle className="h-6 w-6 text-destructive" />
+              <XCircle className="h-6 w-6 text-destructive" weight="fill" />
             </div>
             <CardTitle className="text-destructive">Invalid Invite</CardTitle>
             <CardDescription>
@@ -101,7 +101,7 @@ export default function InviteLandingPage() {
       <Card className="w-full max-w-md text-center">
         <CardHeader>
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 mb-4">
-            <CheckCircle2 className="h-6 w-6 text-primary" />
+            <CheckCircle className="h-6 w-6 text-primary" weight="fill" />
           </div>
           <CardTitle className="text-2xl">You've been invited!</CardTitle>
           <CardDescription>

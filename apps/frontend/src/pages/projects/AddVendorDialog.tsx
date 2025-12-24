@@ -6,7 +6,7 @@ import { Input } from "@/ui/input";
 import { Label } from "@/ui/label";
 import { useSuppliers, useCreateSupplier } from "@/api/useSuppliers";
 import { useAddProjectSupplier } from "@/api/useProjects";
-import { Plus, Loader2 } from "lucide-react";
+import { CircleNotch, Plus } from "@phosphor-icons/react";
 
 interface AddVendorDialogProps {
   isOpen: boolean;
@@ -77,7 +77,7 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
                                 className="mt-2 text-primary hover:text-primary/80"
                                 onClick={() => setView("CREATE")}
                             >
-                                <Plus className="mr-2 h-4 w-4" />
+                                <Plus className="mr-2 h-4 w-4" weight="bold" />
                                 Create "{searchQuery}"
                             </Button>
                         </CommandEmpty>
@@ -96,7 +96,7 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
                                            "No category"}
                                         </span>
                                     </div>
-                                    {isLinking && <Loader2 className="h-4 w-4 animate-spin" />}
+                                    {isLinking && <CircleNotch className="h-4 w-4 animate-spin" />}
                                 </CommandItem>
                             ))}
                         </CommandGroup>
@@ -108,7 +108,7 @@ export function AddVendorDialog({ isOpen, onClose, projectId }: AddVendorDialogP
                         className="w-full justify-start text-muted-foreground hover:text-foreground"
                         onClick={() => setView("CREATE")}
                     >
-                        <Plus className="mr-2 h-4 w-4" />
+                        <Plus className="mr-2 h-4 w-4" weight="bold" />
                         Create new vendor
                     </Button>
                 </div>

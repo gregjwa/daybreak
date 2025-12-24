@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Plus, Building2, Users } from "lucide-react";
+import { Buildings, Plus, UsersThree } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import {
   useOrganizations,
@@ -76,7 +76,7 @@ export default function OrganizationsPage() {
         <div className="flex min-h-[400px] flex-col items-center justify-center rounded-md border border-dashed p-8 text-center animate-in fade-in-50">
           <div className="mx-auto flex max-w-[420px] flex-col items-center justify-center text-center">
             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-muted">
-              <Building2 className="h-10 w-10 text-muted-foreground" />
+              <Buildings className="h-10 w-10 text-muted-foreground" />
             </div>
             <h3 className="mt-4 text-lg font-semibold">No organizations yet</h3>
             <p className="mb-4 mt-2 text-sm text-muted-foreground">
@@ -154,7 +154,7 @@ export default function OrganizationsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
-                    <Users className="h-4 w-4" />
+                    <UsersThree className="h-4 w-4" />
                     {org.memberCount} Member{org.memberCount !== 1 ? "s" : ""}
                   </div>
                   <CardDescription className="mt-4">
@@ -201,7 +201,7 @@ function CreateOrganizationDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button>
-          <Plus className="mr-2 h-4 w-4" />
+          <Plus className="mr-2 h-4 w-4" weight="bold" />
           Create Organization
         </Button>
       </DialogTrigger>

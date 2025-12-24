@@ -9,15 +9,17 @@ import {
   ArrowLeft,
   Check,
   X,
-  Sparkles,
-  Mail,
-  Search,
-  Loader2,
-  CheckCircle2,
-  Building2,
   ThumbsDown,
   Star,
-} from "lucide-react";
+} from "@phosphor-icons/react";
+import {
+  Buildings,
+  CheckCircle,
+  CircleNotch,
+  EnvelopeSimple,
+  MagnifyingGlass,
+  Sparkle,
+} from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import {
   useActiveBackfill,
@@ -229,7 +231,7 @@ export default function InboxImportPage() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-lg font-display font-semibold">Import Suppliers</h1>
+          <h1 className="text-lg font-semibold">Import Suppliers</h1>
           {runStatus && (
             <p className="text-sm text-muted-foreground">
               {isDiscovering
@@ -261,12 +263,12 @@ export default function InboxImportPage() {
             <div className="relative inline-flex">
               <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
               <div className="relative p-4 rounded-full bg-primary/10">
-                <Mail className="h-8 w-8 text-primary animate-bounce" />
+                <EnvelopeSimple className="h-8 w-8 text-primary animate-bounce" />
               </div>
             </div>
 
             <div className="space-y-2">
-              <h2 className="text-xl font-display font-medium">
+              <h2 className="text-xl font-medium">
                 Discovering your suppliers...
               </h2>
               <p className="text-muted-foreground">
@@ -301,12 +303,12 @@ export default function InboxImportPage() {
             <div className="relative inline-flex">
               <div className="absolute inset-0 rounded-full bg-violet-500/20 animate-ping" />
               <div className="relative p-4 rounded-full bg-violet-500/10">
-                <Sparkles className="h-8 w-8 text-violet-500 animate-pulse" />
+                <Sparkle className="h-8 w-8 text-violet-500 animate-pulse" weight="fill" />
               </div>
             </div>
 
             <div className="space-y-2">
-              <h2 className="text-xl font-display font-medium">
+              <h2 className="text-xl font-medium">
                 AI is analyzing your contacts...
               </h2>
               <p className="text-muted-foreground">
@@ -338,7 +340,7 @@ export default function InboxImportPage() {
           {/* Toolbar */}
           <div className="px-6 py-3 border-b flex items-center gap-4 bg-muted/30">
             <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -367,7 +369,7 @@ export default function InboxImportPage() {
               className="gap-1"
             >
               {bulkAccept.isPending ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <CircleNotch className="h-3 w-3 animate-spin" />
               ) : (
                 <Check className="h-3 w-3" />
               )}
@@ -379,11 +381,11 @@ export default function InboxImportPage() {
           <div className="flex-1 overflow-y-auto">
             {loadingCandidates ? (
               <div className="flex items-center justify-center h-32">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <CircleNotch className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : filteredCandidates.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-64 text-center">
-                <CheckCircle2 className="h-12 w-12 text-emerald-500/30 mb-4" />
+                <CheckCircle className="h-12 w-12 text-emerald-500/30 mb-4" weight="fill" />
                 <h3 className="font-medium text-foreground mb-1">All done!</h3>
                 <p className="text-sm text-muted-foreground">
                   No more suppliers to review.
@@ -441,7 +443,7 @@ export default function InboxImportPage() {
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <div className="p-1.5 rounded-md bg-muted">
-                            <Building2 className="h-3 w-3 text-muted-foreground" />
+                            <Buildings className="h-3 w-3 text-muted-foreground" />
                           </div>
                           <span className="font-medium">
                             {candidate.suggestedSupplierName ||

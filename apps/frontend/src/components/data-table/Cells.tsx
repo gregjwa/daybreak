@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/ui/command";
-import { Check, Plus } from "lucide-react";
+import { Check, Plus } from "@phosphor-icons/react";
 
 // --- Cell: Spreadsheet-like wrapper ---
 // Provides minimal, clean styling with subtle hover state
@@ -72,7 +72,7 @@ export const StatusCell = ({ value, onChange, options = DEFAULT_STATUS_OPTIONS }
                     >
                         <div className={cn("w-2 h-2 rounded-full mr-2", opt.color?.replace("bg-", "bg-").split(" ")[0])} />
                         {opt.label}
-                        {value === opt.value && <Check className="ml-auto h-3 w-3 opacity-50" />}
+                        {value === opt.value && <Check className="ml-auto h-3 w-3 opacity-60" weight="bold" />}
                     </button>
                 ))}
             </div>
@@ -146,14 +146,14 @@ export const CategoryCell = ({ value, categories, onChange, onCreateCategory }: 
                   className="flex items-center justify-between cursor-pointer"
                 >
                   <span>{cat.name}</span>
-                  {value === cat.name && <Check className="h-3 w-3 opacity-50" />}
+                  {value === cat.name && <Check className="h-3 w-3 opacity-60" weight="bold" />}
                 </CommandItem>
               ))}
             </CommandGroup>
             {showCreate && (
               <CommandGroup>
                 <CommandItem onSelect={handleCreate} className="cursor-pointer">
-                  <Plus className="h-3 w-3 mr-2" />
+                  <Plus className="h-3 w-3 mr-2" weight="bold" />
                   Create "{search.trim()}"
                 </CommandItem>
               </CommandGroup>
