@@ -84,7 +84,6 @@ const app = new Hono()
         if (debug) {
           console.log("[gmail-webhook] decoded notification:", notification);
         }
-        
         // Find User by email address in GmailWatch
         const watch = await prisma.gmailWatch.findFirst({
             where: { emailAddress },
