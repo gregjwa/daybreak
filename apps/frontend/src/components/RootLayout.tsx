@@ -12,7 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { fetchOrganizations } from "@/api/useOrganizations";
 import { Sheet, SheetContent, SheetTrigger } from "@/ui/sheet";
 import { Button } from "@/ui/button";
-import { Buildings, CalendarBlank, House, Inbox, Kanban, List, UsersThree } from "@phosphor-icons/react";
+import { Buildings, CalendarBlank, House, Kanban, List, Tray, UsersThree } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { useGmailWatch } from "@/hooks/useGmailWatch";
 import ThemeToggle from "@/ui/theme/ThemeToggle";
@@ -63,7 +63,7 @@ const Sidebar = ({ className }: { className?: string }) => {
         <NavLink to="/" icon={House}>
           Dashboard
         </NavLink>
-        <NavLink to="/inbox" icon={Inbox}>
+        <NavLink to="/inbox" icon={Tray}>
           Inbox
         </NavLink>
         <NavLink to="/projects" icon={Kanban}>

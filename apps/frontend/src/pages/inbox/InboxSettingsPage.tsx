@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/
 import { Badge } from "@/ui/badge";
 import { Label } from "@/ui/label";
 import { Textarea } from "@/ui/textarea";
-import { ArrowRight, Check, CircleNotch, EnvelopeSimple, Inbox, Sparkle } from "@phosphor-icons/react";
+import { ArrowRight, Check, CircleNotch, EnvelopeSimple, Sparkle, Tray } from "@phosphor-icons/react";
 import { useActiveBackfill, useStartBackfill } from "@/api/useBackfill";
 import { useSupplierCandidates } from "@/api/useSupplierCandidates";
 
@@ -34,7 +34,7 @@ export default function InboxSettingsPage() {
       <header className="px-6 py-5 border-b bg-background">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-primary/10 rounded-lg">
-            <Inbox className="h-5 w-5 text-primary" weight="bold" />
+            <Tray className="h-5 w-5 text-primary" weight="bold" />
           </div>
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Inbox</h1>

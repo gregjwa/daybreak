@@ -380,7 +380,7 @@ function RolesTab({ orgId, isOwner }: { orgId: string; isOwner: boolean }) {
                   <TableCell className="font-medium">{role.name}</TableCell>
                   <TableCell className="text-right">
                     <Button variant="ghost" size="sm" disabled>
-                      <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      <Trash className="h-4 w-4 text-muted-foreground" />
                     </Button>
                   </TableCell>
                 </TableRow>

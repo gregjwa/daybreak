@@ -4,7 +4,7 @@ import {
   CheckCircle,
   CircleNotch,
   Info,
-  WarningTriangle,
+  Warning,
   XCircle,
 } from "@phosphor-icons/react"
 import type { CSSProperties } from "react"
@@ -21,7 +21,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       icons={{
         success: <CheckCircle className="size-4" weight="fill" />,
         info: <Info className="size-4" weight="fill" />,
-        warning: <WarningTriangle className="size-4" weight="fill" />,
+        warning: <Warning className="size-4" weight="fill" />,
         error: <XCircle className="size-4" weight="fill" />,
         loading: <CircleNotch className="size-4 animate-spin" weight="bold" />,
       }}
