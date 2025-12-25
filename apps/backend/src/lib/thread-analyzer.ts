@@ -10,6 +10,7 @@
 import { prisma } from "../db";
 import { processThreadAnalysis } from "./status-detector";
 import { processThreadForProjectLink } from "./project-linker";
+import { detectStatusFromThread } from "./signal-matcher";
 
 // Types
 export interface ThreadAnalysis {
@@ -98,12 +99,19 @@ Your task is to extract:
    - Any quote amounts mentioned (as numbers)
 
 RULES:
-- Only detect statuses with clear evidence in the messages
+- Detect statuses when there is reasonable evidence in the messages
 - Look at the DIRECTION of messages (INBOUND = from vendor, OUTBOUND = from planner)
-- RFQ signals: outbound messages asking about pricing/availability
-- Quote signals: inbound messages with pricing, "$", costs
-- Confirmation signals: agreement language, "booked", "confirmed"
-- Be conservative - only mark high confidence when evidence is clear
+
+STATUS DETECTION EXAMPLES:
+- rfq-sent: OUTBOUND asking "What are your rates?", "Are you available?", "Can you send a quote?"
+- quote-received: INBOUND with pricing "$500", "Our package is", "The cost would be"
+- confirmed: 
+  * INBOUND: "Confirming our support", "We're confirmed", "Looking forward to", "You're booked"
+  * OUTBOUND: "Let's go ahead", "We'd like to proceed", "Please confirm"
+- contracted: Exchange of contract documents, "Please sign", "Contract attached"
+- deposit-paid: "Payment received", "Deposit sent", "Thank you for the payment"
+
+IMPORTANT: If a vendor says "Confirming our support for [event]" - that IS a confirmation (status: confirmed)!
 
 Respond with ONLY valid JSON matching this schema:
 {
@@ -207,6 +215,13 @@ async function callThreadAnalysisAI(
 
     const content = data.choices?.[0]?.message?.content || "{}";
     
+    // Verbose logging for debugging
+    const debugAnalysis = process.env.DEBUG_ANALYSIS === "1" || process.env.DEBUG_ANALYSIS === "true";
+    if (debugAnalysis) {
+      console.log("[thread-analyzer] User message sent to AI:", userMessage.slice(0, 500));
+      console.log("[thread-analyzer] Raw AI response:", content.slice(0, 1000));
+    }
+    
     // Parse JSON from response
     let jsonStr = content;
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -215,6 +230,16 @@ async function callThreadAnalysisAI(
     }
     
     const parsed = JSON.parse(jsonStr) as ThreadAnalysis;
+    
+    // Always log status detection results for visibility
+    if (parsed.statusProgression && parsed.statusProgression.length > 0) {
+      console.log("[thread-analyzer] AI detected status changes:", 
+        parsed.statusProgression.map(s => `${s.statusSlug} (${s.confidence})`).join(", ")
+      );
+    } else {
+      console.log("[thread-analyzer] AI did not detect status changes");
+    }
+    
     return parsed;
   } catch (error) {
     console.error("[thread-analyzer] Error analyzing thread:", error);
@@ -255,10 +280,46 @@ export async function analyzeThread(threadId: string): Promise<ThreadAnalysis | 
 
   console.log(`[thread-analyzer] Analyzing thread ${threadId} with ${thread.messages.length} messages`);
 
-  const analysis = await callThreadAnalysisAI(thread.messages);
+  const aiAnalysis = await callThreadAnalysisAI(thread.messages);
   
-  if (!analysis) {
+  if (!aiAnalysis) {
     return null;
+  }
+
+  // Start with AI analysis
+  let analysis: ThreadAnalysis = aiAnalysis;
+
+  // FALLBACK: If AI didn't detect status, try keyword-based signal matching
+  if (!analysis.currentStatus || analysis.statusProgression.length === 0) {
+    console.log("[thread-analyzer] AI missed status, trying signal-based fallback...");
+    
+    const signalMatch = await detectStatusFromThread(
+      thread.messages.map(m => ({
+        content: m.content,
+        contentClean: m.contentClean,
+        direction: m.direction,
+      }))
+    );
+    
+    if (signalMatch) {
+      console.log(`[thread-analyzer] Signal fallback detected: ${signalMatch.statusSlug} (${signalMatch.confidence})`);
+      
+      const lastMessage = thread.messages[thread.messages.length - 1];
+      
+      // Add the signal-detected status to the analysis
+      analysis = {
+        ...analysis,
+        currentStatus: signalMatch.statusSlug,
+        statusProgression: [{
+          statusSlug: signalMatch.statusSlug,
+          messageIndex: thread.messages.length - 1,
+          signals: signalMatch.matchedSignals,
+          confidence: signalMatch.confidence,
+          direction: signalMatch.direction,
+          timestamp: lastMessage?.sentAt || new Date(),
+        }],
+      };
+    }
   }
 
   // Store analysis results on the thread
