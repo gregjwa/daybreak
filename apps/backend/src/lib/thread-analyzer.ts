@@ -300,22 +300,40 @@ export async function analyzeThread(threadId: string): Promise<ThreadAnalysis | 
     currentStatus: analysis.currentStatus,
     statusCount: analysis.statusProgression.length,
     projectConfidence: analysis.projectConfidence,
+    eventName: analysis.projectSignals?.eventName,
   });
 
-  // Process status proposals based on analysis
+  // IMPORTANT: Process project linking FIRST, so status detection can find project links
+  try {
+    const linkResult = await processThreadForProjectLink(threadId, thread.userId, { analysis });
+    if (linkResult.projectId) {
+      console.log(`[thread-analyzer] Linked thread to project:`, {
+        projectId: linkResult.projectId,
+        confidence: linkResult.confidence,
+        method: linkResult.method,
+      });
+      
+      // Update messages with the project link so status detector can find them
+      await prisma.message.updateMany({
+        where: { threadId, projectId: null },
+        data: { 
+          projectId: linkResult.projectId,
+          projectLinkConfidence: linkResult.confidence,
+          projectLinkMethod: linkResult.method,
+        },
+      });
+    }
+  } catch (linkError) {
+    console.error(`[thread-analyzer] Failed to process project link for thread ${threadId}:`, linkError);
+  }
+
+  // THEN process status proposals (now messages should have project links)
   if (analysis.statusProgression.length > 0) {
     try {
       await processThreadAnalysis(threadId, analysis);
     } catch (proposalError) {
       console.error(`[thread-analyzer] Failed to process proposals for thread ${threadId}:`, proposalError);
     }
-  }
-
-  // Process project linking
-  try {
-    await processThreadForProjectLink(threadId, thread.userId, { analysis });
-  } catch (linkError) {
-    console.error(`[thread-analyzer] Failed to process project link for thread ${threadId}:`, linkError);
   }
 
   return analysis;

@@ -214,11 +214,45 @@ export async function processGmailThread(
 
       if (existing) {
         existingMessages++;
-        // Update thread link if not set
+        // Update thread link and project link if not set
+        const updateData: { threadId?: string; projectId?: string; projectLinkMethod?: string } = {};
+        
         if (!existing.threadId) {
+          updateData.threadId = emailThread.id;
+        }
+        
+        // If message doesn't have a project, try to link it
+        if (!existing.projectId) {
+          // First, check if thread has a project - inherit it
+          if (emailThread.detectedProjectId) {
+            updateData.projectId = emailThread.detectedProjectId;
+            updateData.projectLinkMethod = "THREAD_INHERIT";
+          } else if (existing.supplierId) {
+            // Fall back to supplier-based lookup
+            const projectSuppliers = await prisma.projectSupplier.findMany({
+              where: { supplierId: existing.supplierId },
+              include: { project: { select: { id: true, date: true } } },
+              orderBy: { project: { date: "desc" } },
+            });
+            
+            if (projectSuppliers.length === 1) {
+              updateData.projectId = projectSuppliers[0].projectId;
+              updateData.projectLinkMethod = "AUTO_SINGLE";
+            } else if (projectSuppliers.length > 1) {
+              const now = new Date();
+              const activeProject = projectSuppliers.find(ps => 
+                !ps.project.date || new Date(ps.project.date) >= now
+              ) || projectSuppliers[0];
+              updateData.projectId = activeProject.projectId;
+              updateData.projectLinkMethod = "AUTO_RECENT";
+            }
+          }
+        }
+        
+        if (Object.keys(updateData).length > 0) {
           await prisma.message.update({
             where: { id: existing.id },
-            data: { threadId: emailThread.id },
+            data: updateData,
           });
         }
         continue;
@@ -227,6 +261,20 @@ export async function processGmailThread(
       // Find matching supplier for this message
       let supplierId: string | undefined;
       let contactMethodId: string | undefined;
+      let projectId: string | undefined;
+      let projectLinkMethod: string | undefined;
+
+      // FIRST: Check if thread already has a project link - inherit it
+      if (emailThread.detectedProjectId) {
+        projectId = emailThread.detectedProjectId;
+        projectLinkMethod = "THREAD_INHERIT";
+        if (debug) {
+          console.log(`[thread-processor] Inherited project from thread:`, {
+            projectId,
+            threadId: emailThread.id,
+          });
+        }
+      }
 
       // For inbound messages, match the sender
       // For outbound messages, match the recipient
@@ -259,6 +307,48 @@ export async function processGmailThread(
               supplierName: contactMethod.contact.supplier.name,
             });
           }
+
+          // Only look up ProjectSupplier if we don't already have a project from thread
+          if (!projectId) {
+            // Find projects this supplier is linked to
+            const projectSuppliers = await prisma.projectSupplier.findMany({
+              where: { supplierId },
+              include: {
+                project: {
+                  select: { id: true, name: true, date: true },
+                },
+              },
+              orderBy: { project: { date: "desc" } },
+            });
+
+            if (projectSuppliers.length === 1) {
+              // Single project - auto-link
+              projectId = projectSuppliers[0].projectId;
+              projectLinkMethod = "AUTO_SINGLE";
+              if (debug) {
+                console.log(`[thread-processor] Auto-linked to single project:`, {
+                  projectId,
+                  projectName: projectSuppliers[0].project.name,
+                });
+              }
+            } else if (projectSuppliers.length > 1) {
+              // Multiple projects - pick the most recent active one (future date or no date)
+              const now = new Date();
+              const activeProject = projectSuppliers.find(ps => 
+                !ps.project.date || new Date(ps.project.date) >= now
+              ) || projectSuppliers[0]; // Fall back to most recent
+              
+              projectId = activeProject.projectId;
+              projectLinkMethod = "AUTO_RECENT";
+              if (debug) {
+                console.log(`[thread-processor] Auto-linked to most recent project:`, {
+                  projectId,
+                  projectName: activeProject.project.name,
+                  totalProjects: projectSuppliers.length,
+                });
+              }
+            }
+          }
         }
       }
 
@@ -277,6 +367,8 @@ export async function processGmailThread(
           sentAt: msg.sentAt,
           hasQuotedContent: msg.hasQuotedContent,
           supplierId,
+          projectId,
+          projectLinkMethod,
           contactMethodId,
         },
       });
@@ -285,6 +377,27 @@ export async function processGmailThread(
 
     if (debug) {
       console.log(`[thread-processor] Thread ${gmailThreadId}: ${newMessages} new, ${existingMessages} existing`);
+    }
+
+    // Update thread's detected project if not set but messages have project links
+    if (!emailThread.detectedProjectId) {
+      const messagesWithProject = await prisma.message.findFirst({
+        where: { threadId: emailThread.id, projectId: { not: null } },
+        select: { projectId: true },
+      });
+      
+      if (messagesWithProject?.projectId) {
+        await prisma.emailThread.update({
+          where: { id: emailThread.id },
+          data: { 
+            detectedProjectId: messagesWithProject.projectId,
+            detectedProjectConf: 0.9, // High confidence since it's from supplier link
+          },
+        });
+        if (debug) {
+          console.log(`[thread-processor] Updated thread detectedProjectId:`, messagesWithProject.projectId);
+        }
+      }
     }
 
     // If there are new messages, trigger thread analysis

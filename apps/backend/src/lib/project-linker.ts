@@ -30,6 +30,21 @@ interface LinkDecision {
 }
 
 /**
+ * Check if project name appears in text (fuzzy matching)
+ */
+function projectNameInText(projectName: string, text: string): boolean {
+  const projectWords = projectName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const textLower = text.toLowerCase();
+  
+  // Check if all significant words from project name appear in text
+  const matchingWords = projectWords.filter(word => textLower.includes(word));
+  
+  // At least 2 words match, or all words if there are only 1-2 words
+  const threshold = Math.min(2, projectWords.length);
+  return matchingWords.length >= threshold;
+}
+
+/**
  * Score a project against thread analysis signals
  */
 function scoreProject(
@@ -41,7 +56,8 @@ function scoreProject(
     type: string;
   },
   analysis: ThreadAnalysis | null,
-  supplierProjectIds: string[]
+  supplierProjectIds: string[],
+  threadContent?: string // Raw thread content for direct matching
 ): ProjectCandidate {
   let score = 0;
   const matchReasons: string[] = [];
@@ -52,10 +68,16 @@ function scoreProject(
     matchReasons.push("Supplier already linked to project");
   }
 
+  // Direct text matching: check if project name appears in thread content
+  if (threadContent && projectNameInText(project.name, threadContent)) {
+    score += 0.35;
+    matchReasons.push(`Project name found in email: "${project.name}"`);
+  }
+
   if (analysis?.projectSignals) {
     const signals = analysis.projectSignals;
 
-    // Event name matching
+    // Event name matching (from AI extraction)
     if (signals.eventName) {
       const nameLower = signals.eventName.toLowerCase();
       const projectNameLower = project.name.toLowerCase();
@@ -145,14 +167,17 @@ export async function detectProjectForThread(
   userId: string,
   opts?: { analysis?: ThreadAnalysis }
 ): Promise<LinkDecision> {
-  // Get the thread
+  // Get the thread with message content for direct matching
   const thread = await prisma.emailThread.findUnique({
     where: { id: threadId },
     include: {
       messages: {
-        where: { supplierId: { not: null } },
-        select: { supplierId: true },
-        distinct: ["supplierId"],
+        select: { 
+          supplierId: true,
+          subject: true,
+          contentClean: true,
+          content: true,
+        },
       },
     },
   });
@@ -169,13 +194,23 @@ export async function detectProjectForThread(
   // Get analysis from opts or from thread
   const analysis = opts?.analysis || (thread.analysisJson as ThreadAnalysis | null);
 
+  // Build combined thread content for direct matching
+  const threadContent = [
+    thread.subject || "",
+    ...thread.messages.map(m => m.subject || ""),
+    ...thread.messages.map(m => m.contentClean || m.content || ""),
+  ].join(" ").toLowerCase();
+
   // Get suppliers from the thread
-  const supplierIds = thread.messages.map(m => m.supplierId).filter((id): id is string => id !== null);
+  const supplierIds = thread.messages
+    .map(m => m.supplierId)
+    .filter((id): id is string => id !== null);
+  const uniqueSupplierIds = [...new Set(supplierIds)];
 
   // Find projects that have any of these suppliers
   const supplierProjects = await prisma.projectSupplier.findMany({
     where: {
-      supplierId: { in: supplierIds },
+      supplierId: { in: uniqueSupplierIds },
       project: { userId },
     },
     select: { projectId: true },
@@ -213,7 +248,7 @@ export async function detectProjectForThread(
 
   // Score each project
   const candidates = projects
-    .map(p => scoreProject(p, analysis, supplierProjectIds))
+    .map(p => scoreProject(p, analysis, supplierProjectIds, threadContent))
     .sort((a, b) => b.score - a.score);
 
   // Decision logic
