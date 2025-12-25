@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useProject } from "@/api/useProjects";
+import { useProject, useUpdateProjectSupplier } from "@/api/useProjects";
+import { useStatuses } from "@/api/useStatuses";
 import { DataTable } from "@/components/data-table/DataTable";
 import { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/ui/button";
-import { InteractiveCell, StatusCell } from "@/components/data-table/Cells";
+import { InteractiveCell, StatusCell, StatusOption } from "@/components/data-table/Cells";
 import { EnvelopeSimple, FunnelSimple, Plus, SquaresFour } from "@phosphor-icons/react";
 import { Avatar, AvatarFallback } from "@/ui/avatar";
 import { AddVendorDialog } from "./AddVendorDialog"; 
@@ -25,7 +26,7 @@ type VendorRow = {
     name: string;
     category: string;
     role: string;
-    status: string;
+    statusSlug: string;
     quoteAmount?: number;
     lastMessage?: LastMessage;
     contactMethods?: any[];
@@ -55,8 +56,32 @@ export default function ProjectVendors() {
     const { data: project, isLoading } = useProject(projectId!, { 
         refetchInterval: VENDOR_POLL_INTERVAL 
     });
+    const { data: statusData } = useStatuses();
+    const updateSupplier = useUpdateProjectSupplier();
     const [selectedCategory, setSelectedCategory] = useState("ALL");
     const [isAddOpen, setIsAddOpen] = useState(false);
+
+    // Convert statuses to options for StatusCell
+    const statusOptions: StatusOption[] = useMemo(() => {
+        if (!statusData?.statuses) return [];
+        return statusData.statuses
+            .sort((a, b) => a.order - b.order)
+            .map(s => ({
+                label: s.name,
+                value: s.slug,
+                color: s.color || "#6B7280",
+            }));
+    }, [statusData]);
+
+    // Handle status change
+    const handleStatusChange = (projectSupplierId: string, newStatusSlug: string) => {
+        if (!projectId) return;
+        updateSupplier.mutate({
+            projectId,
+            projectSupplierId,
+            data: { statusSlug: newStatusSlug },
+        });
+    };
 
     // Derived Data
     const vendors = useMemo<VendorRow[]>(() => {
@@ -79,7 +104,7 @@ export default function ProjectVendors() {
                 name: ps.supplier?.name || "Unknown",
                 category: primaryCat || firstCat || "Uncategorized",
                 role: ps.role,
-                status: ps.status,
+                statusSlug: ps.statusSlug || "needed",
                 quoteAmount: ps.quoteAmount,
                 lastMessage,
                 contactMethods: allContactMethods
@@ -121,12 +146,13 @@ export default function ProjectVendors() {
             cell: ({ row }) => <InteractiveCell>{row.original.category}</InteractiveCell>
         },
         {
-            accessorKey: "status",
+            accessorKey: "statusSlug",
             header: "Status",
             cell: ({ row }) => (
                 <StatusCell 
-                    value={row.original.status} 
-                    onChange={(val) => console.log("Update status", row.original.id, val)}
+                    value={row.original.statusSlug} 
+                    options={statusOptions}
+                    onChange={(val) => handleStatusChange(row.original.id, val)}
                 />
             )
         },
@@ -163,9 +189,10 @@ export default function ProjectVendors() {
 
     if (isLoading) return <div className="p-8">Loading...</div>;
 
-    // "Choice" vendor logic (e.g. status === BOOKED)
-    const bookedVendors = filteredVendors.filter(v => v.status === "BOOKED");
-    const potentialVendors = filteredVendors.filter(v => v.status !== "BOOKED");
+    // "Choice" vendor logic - confirmed or later statuses
+    const confirmedStatuses = ["confirmed", "contracted", "deposit-paid", "fulfilled", "paid-in-full"];
+    const bookedVendors = filteredVendors.filter(v => confirmedStatuses.includes(v.statusSlug));
+    const potentialVendors = filteredVendors.filter(v => !confirmedStatuses.includes(v.statusSlug));
 
     return (
         <div className="flex flex-col h-full bg-surface-canvas min-h-screen">

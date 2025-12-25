@@ -162,6 +162,48 @@ const app = new Hono()
     });
 
     return c.json(projectSupplier, 201);
+  })
+
+  // PATCH /api/projects/:id/suppliers/:supplierId - Update project supplier
+  .patch("/:id/suppliers/:supplierId", async (c) => {
+    const auth = getAuth(c);
+    const projectId = c.req.param("id");
+    const projectSupplierId = c.req.param("supplierId");
+
+    if (!auth?.userId) return c.json({ error: "Unauthorized" }, 401);
+
+    const user = await prisma.user.findUnique({ where: { clerkId: auth.userId } });
+    if (!user) return c.json({ error: "User not found" }, 404);
+
+    // Verify Project ownership
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    // Verify ProjectSupplier exists and belongs to this project
+    const existingPS = await prisma.projectSupplier.findUnique({ 
+      where: { id: projectSupplierId } 
+    });
+    if (!existingPS || existingPS.projectId !== projectId) {
+      return c.json({ error: "ProjectSupplier not found" }, 404);
+    }
+
+    const body = await c.req.json();
+    const { statusSlug, quoteAmount, notes, role, budgetAlloc } = body;
+
+    const updated = await prisma.projectSupplier.update({
+      where: { id: projectSupplierId },
+      data: {
+        ...(statusSlug !== undefined && { statusSlug }),
+        ...(quoteAmount !== undefined && { quoteAmount }),
+        ...(notes !== undefined && { notes }),
+        ...(role !== undefined && { role }),
+        ...(budgetAlloc !== undefined && { budgetAlloc }),
+      },
+    });
+
+    return c.json(updated);
   });
 
 export default app;

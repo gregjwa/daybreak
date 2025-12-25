@@ -33,7 +33,7 @@ export interface ProjectSupplier {
     projectId: string;
     supplierId: string;
     role: string;
-    status: string;
+    statusSlug: string;
     quoteAmount?: number;
     notes?: string;
     supplier?: ProjectSupplierWithMessage;
@@ -124,4 +124,36 @@ export function useAddProjectSupplier() {
       },
     });
   }
+
+export function useUpdateProjectSupplier() {
+  const { getToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ 
+      projectId, 
+      projectSupplierId, 
+      data 
+    }: { 
+      projectId: string; 
+      projectSupplierId: string; 
+      data: { statusSlug?: string; quoteAmount?: number; notes?: string } 
+    }) => {
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/projects/${projectId}/suppliers/${projectSupplierId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update supplier");
+      return res.json();
+    },
+    onSuccess: (_, { projectId }) => {
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+    },
+  });
+}
 

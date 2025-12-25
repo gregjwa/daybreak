@@ -97,6 +97,7 @@ export function getStatusColor(slug: string): string {
     "deposit-paid": "#7C3AED",
     fulfilled: "#14B8A6",
     "paid-in-full": "#22C55E",
+    cancelled: "#EF4444",
   };
   return colors[slug] || "#6B7280";
 }
@@ -114,6 +115,7 @@ export function getStatusName(slug: string): string {
     "deposit-paid": "Deposit Paid",
     fulfilled: "Fulfilled",
     "paid-in-full": "Paid in Full",
+    cancelled: "Cancelled",
   };
   return names[slug] || slug;
 }

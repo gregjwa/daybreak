@@ -33,50 +33,80 @@ export const Cell = ({ children, className, onClick }: CellProps) => {
 export const InteractiveCell = Cell;
 
 // --- Status Cell ---
-interface StatusCellProps {
-  value: string;
-  options?: { label: string; value: string; color?: string }[];
-  onChange?: (value: string) => void;
+export interface StatusOption {
+  label: string;
+  value: string;  // This is the slug
+  color?: string; // Hex color like "#10B981"
 }
 
-const DEFAULT_STATUS_OPTIONS = [
-    { label: "Needed", value: "NEEDED", color: "bg-slate-100 text-slate-700 border-slate-200" },
-    { label: "Contacted", value: "CONTACTED", color: "bg-blue-50 text-blue-700 border-blue-200" },
-    { label: "Quoted", value: "QUOTED", color: "bg-amber-50 text-amber-700 border-amber-200" },
-    { label: "Booked", value: "BOOKED", color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    { label: "Lost", value: "LOST", color: "bg-red-50 text-red-700 border-red-200" },
-];
+interface StatusCellProps {
+  value: string;
+  options: StatusOption[];
+  onChange?: (value: string) => void;
+  disabled?: boolean;
+}
 
-export const StatusCell = ({ value, onChange, options = DEFAULT_STATUS_OPTIONS }: StatusCellProps) => {
-  const currentOption = options.find((o) => o.value === value) || { label: value, value, color: "bg-gray-100" };
+export const StatusCell = ({ value, onChange, options, disabled }: StatusCellProps) => {
+  const currentOption = options.find((o) => o.value === value);
+  const displayLabel = currentOption?.label || value || "—";
+  const displayColor = currentOption?.color || "#6B7280";
+
+  if (disabled || !onChange) {
+    return (
+      <div className="h-9 w-full flex items-center px-3">
+        <Badge 
+          variant="outline" 
+          className="font-normal rounded-md px-2 py-0.5 border h-5 text-xs"
+          style={{ 
+            backgroundColor: `${displayColor}15`,
+            borderColor: `${displayColor}40`,
+            color: displayColor,
+          }}
+        >
+          {displayLabel}
+        </Badge>
+      </div>
+    );
+  }
 
   return (
     <Popover>
-        <PopoverTrigger asChild>
-            <div className="h-9 w-full flex items-center px-3 cursor-pointer hover:bg-muted/50">
-                <Badge variant="outline" className={cn("font-normal rounded-md px-2 py-0.5 border h-5 text-xs transition-all", currentOption.color)}>
-                    {currentOption.label}
-                </Badge>
-            </div>
-        </PopoverTrigger>
-        <PopoverContent className="p-1 w-[140px]" align="start">
-            <div className="flex flex-col gap-0.5">
-                {options.map((opt) => (
-                    <button
-                        key={opt.value}
-                        onClick={() => onChange?.(opt.value)}
-                        className={cn(
-                            "flex items-center w-full px-2 py-1.5 text-sm rounded-sm hover:bg-accent text-left",
-                            value === opt.value && "bg-accent"
-                        )}
-                    >
-                        <div className={cn("w-2 h-2 rounded-full mr-2", opt.color?.replace("bg-", "bg-").split(" ")[0])} />
-                        {opt.label}
-                        {value === opt.value && <Check className="ml-auto h-3 w-3 opacity-60" weight="bold" />}
-                    </button>
-                ))}
-            </div>
-        </PopoverContent>
+      <PopoverTrigger asChild>
+        <div className="h-9 w-full flex items-center px-3 cursor-pointer hover:bg-muted/50">
+          <Badge 
+            variant="outline" 
+            className="font-normal rounded-md px-2 py-0.5 border h-5 text-xs transition-all"
+            style={{ 
+              backgroundColor: `${displayColor}15`,
+              borderColor: `${displayColor}40`,
+              color: displayColor,
+            }}
+          >
+            {displayLabel}
+          </Badge>
+        </div>
+      </PopoverTrigger>
+      <PopoverContent className="p-1 w-[160px]" align="start">
+        <div className="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => onChange(opt.value)}
+              className={cn(
+                "flex items-center w-full px-2 py-1.5 text-sm rounded-sm hover:bg-accent text-left",
+                value === opt.value && "bg-accent"
+              )}
+            >
+              <div 
+                className="w-2 h-2 rounded-full mr-2 flex-shrink-0" 
+                style={{ backgroundColor: opt.color || "#6B7280" }}
+              />
+              <span className="truncate">{opt.label}</span>
+              {value === opt.value && <Check className="ml-auto h-3 w-3 opacity-60 flex-shrink-0" weight="bold" />}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
     </Popover>
   );
 };
