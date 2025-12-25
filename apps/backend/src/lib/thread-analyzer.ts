@@ -29,6 +29,9 @@ export interface ThreadAnalysis {
   statusProgression: StatusDetection[];
   currentStatus: string | null;
   
+  // AI reasoning for debugging
+  reasoning?: string;
+  
   // Supplier info
   supplierSignals: {
     companyName?: string;
@@ -44,7 +47,8 @@ export interface StatusDetection {
   signals: string[];
   confidence: number;
   direction: "INBOUND" | "OUTBOUND";
-  timestamp: Date;
+  timestamp?: Date;
+  reasoning?: string;
 }
 
 interface MessageForAnalysis {
@@ -107,21 +111,27 @@ RULES:
 
 STATUS MEANING GUIDE:
 - rfq-sent: Planner is asking about availability, pricing, or services
-- quote-received: Vendor has provided pricing or a proposal
-- confirmed: Both parties have agreed to work together for the event
+- quote-received: Vendor has PROVIDED ACTUAL PRICING (contains $ amounts or specific rates)
+- confirmed: Vendor has AGREED to do the work (says "yes", "we can do it", "available", "confirmed")
 - contracted: Legal contract has been signed
 - deposit-paid: Money has changed hands (deposit or retainer)
 - fulfilled: Service was SUCCESSFULLY DELIVERED (post-event only)
 - paid-in-full: Final payment completed
 - cancelled: Either party has WITHDRAWN from the agreement
 
-SEMANTIC UNDERSTANDING:
-- "fulfilled" requires the event to have HAPPENED and services delivered successfully
-- "cancelled" is when someone backs out, apologizes they can't do it, or withdraws
-- Negative/apologetic language + withdrawal = cancellation, NOT fulfillment
-- Pay attention to sentiment: positive confirmation vs. negative withdrawal
+IMPORTANT DISTINCTIONS:
+1. "confirmed" vs "quote-received":
+   - "Yes we can do it. Will send quote later" = CONFIRMED (they agreed to the work)
+   - "Here's our pricing: $500" = QUOTE-RECEIVED (actual pricing provided)
+   - A vendor confirming availability WITHOUT pricing = CONFIRMED, not quote-received
 
-Focus on the LATEST message to detect the CURRENT status, while using historical messages for context.
+2. "cancelled" vs "fulfilled":
+   - "Can no longer do it", "unfortunately", "backing out" = CANCELLED
+   - "Thank you for having us", "great event" (POST-EVENT) = FULFILLED
+
+3. Focus on the LATEST message for current status, use history for context.
+
+Always include a "reasoning" field explaining your status detection logic.
 
 Respond with ONLY valid JSON matching this schema:
 {
@@ -136,14 +146,16 @@ Respond with ONLY valid JSON matching this schema:
   "projectConfidence": 0.0-1.0,
   "statusProgression": [
     {
-      "statusSlug": "quote-received",
-      "messageIndex": 2,
-      "signals": ["$3500", "package pricing"],
+      "statusSlug": "confirmed",
+      "messageIndex": 0,
+      "signals": ["yes we can", "available"],
       "confidence": 0.9,
-      "direction": "INBOUND"
+      "direction": "INBOUND",
+      "reasoning": "Vendor confirmed they can fulfill the request for the specified date"
     }
   ],
-  "currentStatus": "quote-received or null",
+  "currentStatus": "confirmed or null",
+  "reasoning": "Overall explanation of status detection logic",
   "supplierSignals": {
     "companyName": "string or null",
     "contactName": "string or null",
@@ -377,6 +389,7 @@ export async function analyzeThread(threadId: string): Promise<ThreadAnalysis | 
     statusCount: analysis.statusProgression.length,
     projectConfidence: analysis.projectConfidence,
     eventName: analysis.projectSignals?.eventName,
+    reasoning: analysis.reasoning,
   });
 
   // IMPORTANT: Process project linking FIRST, so status detection can find project links

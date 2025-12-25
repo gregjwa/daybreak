@@ -53,12 +53,16 @@ function findMatchingSignals(text: string, signals: string[]): string[] {
 
 /**
  * Detect status from message content using keyword matching
+ * Returns the BEST match (most signals matched, ties go to higher order status)
  */
 export async function detectStatusFromSignals(
   content: string,
   direction: "INBOUND" | "OUTBOUND"
 ): Promise<SignalMatch | null> {
   const statuses = await getStatuses();
+  
+  // Collect ALL matches, then pick the best one
+  const allMatches: (SignalMatch & { order: number })[] = [];
   
   for (const status of statuses) {
     // Check signals based on direction
@@ -71,21 +75,46 @@ export async function detectStatusFromSignals(
     const matchedSignals = findMatchingSignals(content, signals);
     
     if (matchedSignals.length > 0) {
-      // Calculate confidence based on number of matches
-      const confidence = Math.min(0.6 + (matchedSignals.length * 0.1), 0.85);
+      // Calculate confidence based on number of matches and signal specificity
+      const avgSignalLength = matchedSignals.reduce((a, s) => a + s.length, 0) / matchedSignals.length;
+      const specificityBonus = Math.min(avgSignalLength / 20, 0.15); // Longer signals = more specific
+      const confidence = Math.min(0.6 + (matchedSignals.length * 0.1) + specificityBonus, 0.85);
       
-      console.log(`[signal-matcher] Matched status "${status.slug}" with signals:`, matchedSignals);
-      
-      return {
+      allMatches.push({
         statusSlug: status.slug,
         matchedSignals,
         confidence,
         direction,
-      };
+        order: status.order,
+      });
     }
   }
   
-  return null;
+  if (allMatches.length === 0) {
+    return null;
+  }
+  
+  // Sort by: 1) number of matched signals (more = better), 2) status order (higher = further in flow)
+  allMatches.sort((a, b) => {
+    if (b.matchedSignals.length !== a.matchedSignals.length) {
+      return b.matchedSignals.length - a.matchedSignals.length;
+    }
+    return b.order - a.order;
+  });
+  
+  const best = allMatches[0];
+  console.log(`[signal-matcher] Matched status "${best.statusSlug}" with signals:`, best.matchedSignals);
+  
+  if (allMatches.length > 1) {
+    console.log(`[signal-matcher] Also considered:`, allMatches.slice(1).map(m => `${m.statusSlug} (${m.matchedSignals.join(', ')})`));
+  }
+  
+  return {
+    statusSlug: best.statusSlug,
+    matchedSignals: best.matchedSignals,
+    confidence: best.confidence,
+    direction: best.direction,
+  };
 }
 
 /**

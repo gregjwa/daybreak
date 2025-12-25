@@ -40,7 +40,8 @@ const SUPPLIER_STATUSES = [
     description: "Vendor has provided a quote or pricing information",
     order: 4,
     color: "#06B6D4", // cyan-500
-    inboundSignals: ["quote", "pricing", "$", "per hour", "package", "rate", "cost", "price", "total", "estimate", "proposal attached", "here's what we charge"],
+    // More specific signals - avoid matching "will send quote" which is just a promise
+    inboundSignals: ["$", "per hour", "per day", "rate is", "cost is", "price is", "total is", "estimate is", "proposal attached", "here's what we charge", "our pricing", "quote attached", "pricing below", "quote is"],
     outboundSignals: [],
     threadPatterns: ["first inbound with pricing after outbound inquiry"],
   },
@@ -60,7 +61,8 @@ const SUPPLIER_STATUSES = [
     description: "Vendor is confirmed for the event",
     order: 6,
     color: "#10B981", // emerald-500
-    inboundSignals: ["confirm", "booked", "reserved", "looking forward", "see you on", "you're all set"],
+    // Signals indicating vendor is agreeing to do the work
+    inboundSignals: ["confirm", "booked", "reserved", "looking forward", "see you on", "you're all set", "yes we can", "we can do", "we can fulfil", "we can fulfill", "available on", "we're available", "count us in", "happy to help", "we'd be delighted"],
     outboundSignals: ["confirm", "proceed", "go ahead", "let's do it", "book", "reserve", "we'd like to move forward"],
     threadPatterns: ["agreement reached on terms"],
   },
