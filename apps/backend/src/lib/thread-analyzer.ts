@@ -75,7 +75,7 @@ Your task is to extract:
    - Budget discussions
 
 2. STATUS PROGRESSION - Identify what stage the vendor relationship is at:
-   Possible statuses (in order):
+   Possible statuses (in order of normal progression):
    - needed: Vendor needed but not contacted yet
    - shortlisted: Vendor identified as potential option
    - rfq-sent: Request for quote sent to vendor
@@ -84,8 +84,11 @@ Your task is to extract:
    - confirmed: Vendor confirmed for the event
    - contracted: Contract signed
    - deposit-paid: Initial payment made
-   - fulfilled: Service delivered
+   - fulfilled: Service delivered (post-event)
    - paid-in-full: Final payment complete
+   
+   OFF-RAMP STATUS (can happen at any point):
+   - cancelled: Vendor or planner has cancelled/withdrawn from the booking
 
    For each status change you detect, identify:
    - Which message triggered it (by index, 0-based)
@@ -102,16 +105,23 @@ RULES:
 - Detect statuses when there is reasonable evidence in the messages
 - Look at the DIRECTION of messages (INBOUND = from vendor, OUTBOUND = from planner)
 
-STATUS DETECTION EXAMPLES:
-- rfq-sent: OUTBOUND asking "What are your rates?", "Are you available?", "Can you send a quote?"
-- quote-received: INBOUND with pricing "$500", "Our package is", "The cost would be"
-- confirmed: 
-  * INBOUND: "Confirming our support", "We're confirmed", "Looking forward to", "You're booked"
-  * OUTBOUND: "Let's go ahead", "We'd like to proceed", "Please confirm"
-- contracted: Exchange of contract documents, "Please sign", "Contract attached"
-- deposit-paid: "Payment received", "Deposit sent", "Thank you for the payment"
+STATUS MEANING GUIDE:
+- rfq-sent: Planner is asking about availability, pricing, or services
+- quote-received: Vendor has provided pricing or a proposal
+- confirmed: Both parties have agreed to work together for the event
+- contracted: Legal contract has been signed
+- deposit-paid: Money has changed hands (deposit or retainer)
+- fulfilled: Service was SUCCESSFULLY DELIVERED (post-event only)
+- paid-in-full: Final payment completed
+- cancelled: Either party has WITHDRAWN from the agreement
 
-IMPORTANT: If a vendor says "Confirming our support for [event]" - that IS a confirmation (status: confirmed)!
+SEMANTIC UNDERSTANDING:
+- "fulfilled" requires the event to have HAPPENED and services delivered successfully
+- "cancelled" is when someone backs out, apologizes they can't do it, or withdraws
+- Negative/apologetic language + withdrawal = cancellation, NOT fulfillment
+- Pay attention to sentiment: positive confirmation vs. negative withdrawal
+
+Focus on the LATEST message to detect the CURRENT status, while using historical messages for context.
 
 Respond with ONLY valid JSON matching this schema:
 {
@@ -154,12 +164,17 @@ function buildUserMessage(messages: MessageForAnalysis[]): string {
     (a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime()
   );
   
+  // Mark the most recent message as NEW
+  const newestIndex = sorted.length - 1;
+  
   for (let i = 0; i < sorted.length; i++) {
     const msg = sorted[i];
     const content = msg.contentClean || msg.content;
+    const isNewest = i === newestIndex;
     const preview = content.slice(0, 500) + (content.length > 500 ? "..." : "");
     
-    lines.push(`--- Message ${i} ---`);
+    const marker = isNewest ? " [NEW - LATEST MESSAGE]" : "";
+    lines.push(`--- Message ${i}${marker} ---`);
     lines.push(`Direction: ${msg.direction}`);
     lines.push(`Date: ${msg.sentAt.toISOString()}`);
     if (msg.subject) lines.push(`Subject: ${msg.subject}`);

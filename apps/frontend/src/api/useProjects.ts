@@ -60,12 +60,20 @@ export function useProjects() {
   });
 }
 
-export function useProject(id: string) {
+export interface UseProjectOptions {
+  /** Poll interval in milliseconds. Set to false to disable polling. Default: false */
+  refetchInterval?: number | false;
+}
+
+export function useProject(id: string, options: UseProjectOptions = {}) {
     const { getToken } = useAuth();
     return useQuery<Project>({
       queryKey: ["projects", id],
       queryFn: async () => fetcher(`/projects/${id}`, await getToken()),
       enabled: !!id,
+      refetchInterval: options.refetchInterval,
+      // Only refetch when window is focused if polling is enabled
+      refetchIntervalInBackground: false,
     });
   }
 

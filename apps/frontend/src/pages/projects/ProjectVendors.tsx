@@ -47,9 +47,14 @@ function formatRelativeTime(dateString: string): string {
     return date.toLocaleDateString();
 }
 
+// Poll interval for live updates (5 seconds)
+const VENDOR_POLL_INTERVAL = 5000;
+
 export default function ProjectVendors() {
     const { projectId } = useParams<{ projectId: string }>();
-    const { data: project, isLoading } = useProject(projectId!);
+    const { data: project, isLoading } = useProject(projectId!, { 
+        refetchInterval: VENDOR_POLL_INTERVAL 
+    });
     const [selectedCategory, setSelectedCategory] = useState("ALL");
     const [isAddOpen, setIsAddOpen] = useState(false);
 

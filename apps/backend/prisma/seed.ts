@@ -65,6 +65,16 @@ const SUPPLIER_STATUSES = [
     threadPatterns: ["agreement reached on terms"],
   },
   {
+    slug: "cancelled",
+    name: "Cancelled",
+    description: "Vendor booking has been cancelled",
+    order: 11, // After the main flow - it's an off-ramp
+    color: "#EF4444", // red-500
+    inboundSignals: ["can no longer", "unable to", "unfortunately", "have to cancel", "backing out", "cannot accommodate", "regret to inform", "apologies", "sorry", "decline", "withdraw"],
+    outboundSignals: ["have to cancel", "no longer need", "going with another", "decided against", "cancelling", "won't be proceeding"],
+    threadPatterns: ["either party backing out of agreement"],
+  },
+  {
     slug: "contracted",
     name: "Contracted",
     description: "Contract has been signed",
