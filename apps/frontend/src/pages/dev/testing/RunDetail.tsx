@@ -7,6 +7,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useRun, TestResult } from "@/api/useTesting";
+import { getApiBaseUrl } from "@/lib/apiBase";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
 import { Badge } from "@/ui/badge";
@@ -129,7 +130,7 @@ export default function RunDetail() {
           <Button
             variant="outline"
             onClick={() => {
-              window.open(`/api/testing/runs/${id}/export`, "_blank");
+              window.open(`${getApiBaseUrl()}/testing/runs/${id}/export`, "_blank");
             }}
             disabled={run.status === "RUNNING"}
             title={run.status === "RUNNING" ? "Wait for run to complete" : "Export for Claude Code review"}
