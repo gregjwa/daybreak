@@ -145,12 +145,17 @@ export default function RunnerPage() {
               {/* Model Override */}
               <div className="space-y-2">
                 <Label htmlFor="model">Model Override (Optional)</Label>
-                <Select value={modelOverride} onValueChange={setModelOverride}>
+                <Select
+                  value={modelOverride || "__default__"}
+                  onValueChange={(v) => setModelOverride(v === "__default__" ? "" : v)}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder={`Use prompt default (${selectedPrompt?.model || "gpt-5-mini"})`} />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Use prompt default</SelectItem>
+                    <SelectItem value="__default__">
+                      Use prompt default ({selectedPrompt?.model || "gpt-5-mini"})
+                    </SelectItem>
                     {MODELS.map((m) => (
                       <SelectItem key={m.value} value={m.value}>
                         {m.label}
