@@ -4,7 +4,7 @@
  * View and edit AI prompts for status detection testing.
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePrompts, usePrompt, useCreatePrompt, useUpdatePrompt, useDefaultPrompt, useDeletePrompt, TestPrompt } from "@/api/useTesting";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
@@ -272,10 +272,10 @@ function PromptEditorDialog({
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [model, setModel] = useState("gpt-5-mini");
-  const [maxTokens, setMaxTokens] = useState(500);
+  const [maxTokens, setMaxTokens] = useState(1500);
 
   // Initialize form when prompt changes
-  useState(() => {
+  useEffect(() => {
     if (prompt) {
       setVersion(prompt.version);
       setName(prompt.name);
@@ -295,9 +295,9 @@ function PromptEditorDialog({
       setDescription("");
       setSystemPrompt("");
       setModel("gpt-4o-mini");
-      setMaxTokens(500);
+      setMaxTokens(1500);
     }
-  });
+  }, [prompt, isCreating, existingPrompts]);
 
   const isOpen = !!prompt || isCreating;
 
