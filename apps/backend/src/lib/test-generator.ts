@@ -151,110 +151,625 @@ export async function generatePersonas(): Promise<{ created: number; existing: n
 // --- Email Generation ---
 
 interface TestScenario {
-  status: string;
+  // V1 model (LEGACY - for backward compatibility with old test runs only)
+  // Maps to old 11-status model. Will be removed after v2 validation.
+  legacyStatus: string;
+  previousStatus?: string; // Status before this email arrived (for progression context)
+
+  // V2 model (primary/sub/action) - THE ACTUAL TEST EXPECTATIONS
+  primaryStatus: "contacting" | "quoted" | "booked" | "completed" | "cancelled";
+  subStatus: string | null;
+  actions: string[];
+
   direction: "INBOUND" | "OUTBOUND";
   scenario: "normal" | "tricky" | "followup" | "edge";
   difficulty: number;
   threadContext?: { direction: string; subject: string; body: string }[];
   prompt: string;
   tags: string[];
-  previousStatus?: string; // Status before this email arrived (for progression context)
 }
 
-// Scenarios for each status and direction
+// Helper to create scenario with both v1 and v2 fields
+// legacyV1Status: Maps to old model for comparison runs (rfq-sent, quote-received, etc.)
+function scenario(
+  legacyV1Status: string,
+  primaryStatus: TestScenario["primaryStatus"],
+  subStatus: string | null,
+  actions: string[],
+  direction: "INBOUND" | "OUTBOUND",
+  scenarioType: "normal" | "tricky" | "followup" | "edge",
+  difficulty: number,
+  prompt: string,
+  tags: string[],
+  opts?: { previousStatus?: string; threadContext?: { direction: string; subject: string; body: string }[] }
+): TestScenario {
+  return {
+    legacyStatus: legacyV1Status,
+    primaryStatus,
+    subStatus,
+    actions,
+    direction,
+    scenario: scenarioType,
+    difficulty,
+    prompt,
+    tags,
+    previousStatus: opts?.previousStatus,
+    threadContext: opts?.threadContext,
+  };
+}
+
+// Scenarios for each status using v2 model (primary/sub/actions)
+// Addresses all feedback from ChatGPT review:
+// 1. Fixed action flags (reply-needed only when question asked)
+// 2. Added attachment-based quote scenarios
+// 3. Added budget context (within-budget, over-budget)
+// 4. Added messy/ambiguous booking scenarios
+// 5. Added needs-review ambiguous scenarios
+// 6. Rebalanced counts
 function getScenarios(): TestScenario[] {
   const scenarios: TestScenario[] = [];
 
-  // --- INBOUND SCENARIOS (From Supplier) ---
+  // ============================================
+  // CONTACTING - Initial contact phase
+  // ============================================
 
-  // Confirmed - Inbound (vendor explicitly agrees to booking after quote/negotiation)
-  // These come AFTER quote-received or negotiating - the booking decision is made
-  for (let i = 0; i < 30; i++) scenarios.push({ status: "confirmed", direction: "INBOUND", scenario: "normal", difficulty: 1, previousStatus: "negotiating", prompt: "Write an email where the vendor confirms the booking is set. The planner has already accepted the quote - this is the vendor acknowledging they're booked. Example: 'Great, you're all set for March 15th!' or 'Looking forward to your event!'", tags: ["confirmation"] });
-  for (let i = 0; i < 10; i++) scenarios.push({ status: "confirmed", direction: "INBOUND", scenario: "tricky", difficulty: 2, previousStatus: "quote-received", prompt: "Write an email where the vendor agrees to proceed using casual language after the planner accepted. Example: 'Awesome, see you there!' or 'Can't wait!'", tags: ["confirmation", "indirect"] });
-  for (let i = 0; i < 6; i++) scenarios.push({ status: "confirmed", direction: "INBOUND", scenario: "followup", difficulty: 3, previousStatus: "negotiating", threadContext: [{ direction: "OUTBOUND", subject: "Let's proceed!", body: "We'd like to book you for March 15th!" }], prompt: "Write a short 1-2 sentence reply accepting the booking. Example: 'Great, you're booked!' or 'Perfect, see you then!'", tags: ["confirmation", "followup"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "confirmed", direction: "INBOUND", scenario: "edge", difficulty: 4, previousStatus: "negotiating", prompt: "Write a confirmation where the vendor says they'll send the contract soon - they're committed but paperwork is pending.", tags: ["confirmation", "edge", "contract-mention"] });
+  // Contacting + awaiting-response (Planner sent inquiry, waiting for vendor)
+  for (let i = 0; i < 30; i++) scenarios.push(
+    scenario("rfq-sent", "contacting", "awaiting-response", [],
+      "OUTBOUND", "normal", 1,
+      "Write an inquiry email asking about availability and pricing for an event. Be specific about date and guest count.",
+      ["inquiry", "rfq"])
+  );
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("rfq-sent", "contacting", "awaiting-response", [],
+      "OUTBOUND", "tricky", 2,
+      "Write a subtle inquiry that asks about services without explicitly mentioning pricing.",
+      ["inquiry", "indirect"])
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("rfq-sent", "contacting", "awaiting-response", [],
+      "OUTBOUND", "followup", 3,
+      "Write a reply asking about their services for a specific event.",
+      ["inquiry", "followup"],
+      { threadContext: [{ direction: "INBOUND", subject: "Welcome!", body: "Thanks for reaching out. How can we help?" }] })
+  );
 
-  // Quote-received - Inbound (vendor sends quote after inquiry)
-  for (let i = 0; i < 25; i++) scenarios.push({ status: "quote-received", direction: "INBOUND", scenario: "normal", difficulty: 1, previousStatus: "rfq-sent", prompt: "Write an email with actual pricing. Include specific dollar amounts like '$500' or '$1,200'.", tags: ["pricing", "quote"] });
-  for (let i = 0; i < 8; i++) scenarios.push({ status: "quote-received", direction: "INBOUND", scenario: "tricky", difficulty: 2, previousStatus: "rfq-sent", prompt: "Write an email with pricing information using indirect language. Use phrases like 'investment' instead of 'cost'.", tags: ["pricing", "indirect"] });
-  for (let i = 0; i < 4; i++) scenarios.push({ status: "quote-received", direction: "INBOUND", scenario: "followup", difficulty: 3, previousStatus: "rfq-sent", threadContext: [{ direction: "OUTBOUND", subject: "Quote request", body: "Can you send me your pricing for a 100-person event?" }], prompt: "Write a reply with the requested pricing information.", tags: ["pricing", "followup"] });
-  for (let i = 0; i < 4; i++) scenarios.push({ status: "quote-received", direction: "INBOUND", scenario: "edge", difficulty: 4, previousStatus: "rfq-sent", prompt: "Write an email with pricing buried in the middle of a long message about other topics.", tags: ["pricing", "edge"] });
+  // Contacting + vendor-available WITH question (reply-needed)
+  for (let i = 0; i < 15; i++) scenarios.push(
+    scenario("rfq-sent", "contacting", "vendor-available", ["reply-needed"],
+      "INBOUND", "normal", 1,
+      "Write where vendor says they're AVAILABLE and ASKS A QUESTION about the event. NO pricing. Must include a question like 'What time?' or 'How many guests?' or 'Tell me more about your vision.'",
+      ["availability", "with-question"])
+  );
 
-  // Cancelled - Inbound (vendor cancels after being confirmed)
-  for (let i = 0; i < 20; i++) scenarios.push({ status: "cancelled", direction: "INBOUND", scenario: "normal", difficulty: 1, previousStatus: "confirmed", prompt: "Write an email where the vendor cancels or backs out of the booking. Clear cancellation.", tags: ["cancellation"] });
-  for (let i = 0; i < 10; i++) scenarios.push({ status: "cancelled", direction: "INBOUND", scenario: "tricky", difficulty: 2, previousStatus: "confirmed", prompt: "Write a cancellation email using apologetic, indirect language without saying 'cancel'.", tags: ["cancellation", "indirect"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "cancelled", direction: "INBOUND", scenario: "followup", difficulty: 3, previousStatus: "confirmed", threadContext: [{ direction: "INBOUND", subject: "Confirmed for March 15th", body: "Looking forward to your event!" }], prompt: "Write a follow-up where they now have to cancel. Make it apologetic.", tags: ["cancellation", "reversal"] });
-  for (let i = 0; i < 6; i++) scenarios.push({ status: "cancelled", direction: "INBOUND", scenario: "edge", difficulty: 4, previousStatus: "contracted", prompt: "Write a cancellation email that uses the word 'fulfill' in a negative way (e.g., 'cannot fulfill'). This should be clearly a cancellation.", tags: ["cancellation", "edge", "fulfill-word"] });
+  // Contacting + vendor-available WITHOUT question (no reply-needed)
+  for (let i = 0; i < 10; i++) scenarios.push(
+    scenario("rfq-sent", "contacting", "vendor-available", [],
+      "INBOUND", "normal", 1,
+      "Write where vendor confirms availability but does NOT ask any questions. Just 'Yes, I'm available March 15th!' or 'Count me in!' NO pricing, NO questions.",
+      ["availability", "no-question"])
+  );
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("rfq-sent", "contacting", "vendor-available", [],
+      "INBOUND", "tricky", 2,
+      "Vendor confirms availability enthusiastically without price or questions. Example: 'I'd love to help! That date works for me.' NO dollar amounts, NO questions.",
+      ["availability", "enthusiastic"])
+  );
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("rfq-sent", "contacting", "vendor-available", [],
+      "INBOUND", "edge", 4,
+      "Vendor says available and mentions 'I'll send pricing soon' or 'quote to follow' - but NO actual numbers yet. This is still contacting, not quoted. No questions.",
+      ["availability", "quote-promised"])
+  );
 
-  // Negotiating - Inbound (vendor responds to negotiation after quote)
-  for (let i = 0; i < 15; i++) scenarios.push({ status: "negotiating", direction: "INBOUND", scenario: "normal", difficulty: 1, previousStatus: "quote-received", prompt: "Write an email where the vendor responds to a negotiation request with a counter-offer.", tags: ["negotiation"] });
-  for (let i = 0; i < 8; i++) scenarios.push({ status: "negotiating", direction: "INBOUND", scenario: "tricky", difficulty: 2, previousStatus: "quote-received", prompt: "Write a subtle negotiation email that doesn't explicitly mention prices but discusses terms.", tags: ["negotiation", "indirect"] });
-  for (let i = 0; i < 4; i++) scenarios.push({ status: "negotiating", direction: "INBOUND", scenario: "followup", difficulty: 3, previousStatus: "quote-received", threadContext: [{ direction: "OUTBOUND", subject: "Budget discussion", body: "Is there any flexibility on the $2000 quote?" }], prompt: "Write a short reply offering a small discount or compromise.", tags: ["negotiation", "followup"] });
-  for (let i = 0; i < 3; i++) scenarios.push({ status: "negotiating", direction: "INBOUND", scenario: "edge", difficulty: 4, previousStatus: "quote-received", prompt: "Write a negotiation response that could be mistaken for either acceptance or rejection.", tags: ["negotiation", "edge"] });
+  // Contacting + vendor-unavailable
+  for (let i = 0; i < 12; i++) scenarios.push(
+    scenario("rfq-sent", "contacting", "vendor-unavailable", [],
+      "INBOUND", "normal", 1,
+      "Write an email where the vendor says they're NOT available for the requested date. Be polite but clear.",
+      ["unavailable"])
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("rfq-sent", "contacting", "vendor-unavailable", [],
+      "INBOUND", "tricky", 2,
+      "Vendor is unavailable but uses soft language like 'unfortunately booked' or 'already committed'.",
+      ["unavailable", "soft"])
+  );
 
-  // Contracted - Inbound (vendor confirms contract has been SIGNED/EXECUTED)
-  for (let i = 0; i < 12; i++) scenarios.push({ status: "contracted", direction: "INBOUND", scenario: "normal", difficulty: 1, previousStatus: "confirmed", prompt: "Write an email confirming the contract has been signed and executed. Use phrases like 'contract is signed', 'agreement is finalized', or 'paperwork is complete'.", tags: ["contract"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "contracted", direction: "INBOUND", scenario: "tricky", difficulty: 2, previousStatus: "confirmed", prompt: "Write an email confirming the contract is finalized using indirect language like 'everything is official now' or 'we're all set legally'.", tags: ["contract", "indirect"] });
-  // NOTE: Contract being SENT (not signed) should remain "confirmed" - moved to confirmed scenarios
-  for (let i = 0; i < 3; i++) scenarios.push({ status: "contracted", direction: "INBOUND", scenario: "followup", difficulty: 3, previousStatus: "confirmed", threadContext: [{ direction: "OUTBOUND", subject: "Signed contract", body: "Just sent back the signed contract!" }], prompt: "Write a reply confirming you've received the signed contract.", tags: ["contract", "followup"] });
-  for (let i = 0; i < 2; i++) scenarios.push({ status: "contracted", direction: "INBOUND", scenario: "edge", difficulty: 4, previousStatus: "confirmed", prompt: "Write about a contract that was signed but with minor amendments noted.", tags: ["contract", "edge"] });
+  // Contacting + chasing-response (Follow-up sent)
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("rfq-sent", "contacting", "chasing-response", [],
+      "OUTBOUND", "normal", 1,
+      "Write a polite follow-up email checking if the vendor received the original inquiry.",
+      ["followup", "chase"],
+      { previousStatus: "rfq-sent" })
+  );
 
-  // Deposit-paid - Inbound (vendor confirms deposit received after contract)
-  for (let i = 0; i < 12; i++) scenarios.push({ status: "deposit-paid", direction: "INBOUND", scenario: "normal", difficulty: 1, previousStatus: "contracted", prompt: "Write an email confirming receipt of a deposit or payment.", tags: ["payment", "deposit"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "deposit-paid", direction: "INBOUND", scenario: "tricky", difficulty: 2, previousStatus: "contracted", prompt: "Write a payment confirmation using indirect language.", tags: ["payment", "indirect"] });
-  for (let i = 0; i < 2; i++) scenarios.push({ status: "deposit-paid", direction: "INBOUND", scenario: "followup", difficulty: 3, previousStatus: "contracted", threadContext: [{ direction: "OUTBOUND", subject: "Deposit sent", body: "Just transferred the deposit!" }], prompt: "Write a short acknowledgment of receiving the payment.", tags: ["payment", "followup"] });
-  for (let i = 0; i < 2; i++) scenarios.push({ status: "deposit-paid", direction: "INBOUND", scenario: "edge", difficulty: 4, previousStatus: "contracted", prompt: "Write about a payment that was partially received or had issues.", tags: ["payment", "edge"] });
+  // ============================================
+  // QUOTED - Vendor has provided pricing
+  // ============================================
 
-  // Fulfilled - Inbound (post-event after deposit paid)
-  for (let i = 0; i < 15; i++) scenarios.push({ status: "fulfilled", direction: "INBOUND", scenario: "normal", difficulty: 1, previousStatus: "deposit-paid", prompt: "Write a post-event thank you email from the vendor. The event has happened.", tags: ["post-event", "thanks"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "fulfilled", direction: "INBOUND", scenario: "tricky", difficulty: 2, previousStatus: "deposit-paid", prompt: "Write a subtle post-event message that doesn't explicitly say 'thank you'.", tags: ["post-event", "indirect"] });
-  for (let i = 0; i < 3; i++) scenarios.push({ status: "fulfilled", direction: "INBOUND", scenario: "followup", difficulty: 3, previousStatus: "deposit-paid", threadContext: [{ direction: "OUTBOUND", subject: "Great event!", body: "Thank you so much for yesterday!" }], prompt: "Write a warm reply about enjoying working together.", tags: ["post-event", "followup"] });
-  for (let i = 0; i < 3; i++) scenarios.push({ status: "fulfilled", direction: "INBOUND", scenario: "edge", difficulty: 4, previousStatus: "deposit-paid", prompt: "Write a post-event email that mentions both the completed service and a future opportunity.", tags: ["post-event", "edge"] });
+  // Quoted + budget-unknown (standard quote with $ amounts)
+  for (let i = 0; i < 25; i++) scenarios.push(
+    scenario("quote-received", "quoted", "budget-unknown", ["review-quote"],
+      "INBOUND", "normal", 1,
+      "Write an email with actual pricing. Include specific dollar amounts like '$500', '$1,200', or '$2,500 for the day'. This is a quote response.",
+      ["pricing", "quote"],
+      { previousStatus: "rfq-sent" })
+  );
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("quote-received", "quoted", "budget-unknown", ["review-quote"],
+      "INBOUND", "tricky", 2,
+      "Write pricing using indirect language like 'investment of $1,500' or 'packages starting at $800'.",
+      ["pricing", "indirect"],
+      { previousStatus: "rfq-sent" })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("quote-received", "quoted", "budget-unknown", ["review-quote"],
+      "INBOUND", "followup", 3,
+      "Write a reply with the requested pricing information.",
+      ["pricing", "followup"],
+      { previousStatus: "rfq-sent", threadContext: [{ direction: "OUTBOUND", subject: "Quote request", body: "Can you send me your pricing for a 100-person event?" }] })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("quote-received", "quoted", "budget-unknown", ["review-quote"],
+      "INBOUND", "edge", 4,
+      "Write pricing buried in the middle of a long message about services and experience. Include at least one $ amount somewhere.",
+      ["pricing", "edge"],
+      { previousStatus: "rfq-sent" })
+  );
 
-  // Paid-in-full - Inbound (final payment after service fulfilled)
-  for (let i = 0; i < 10; i++) scenarios.push({ status: "paid-in-full", direction: "INBOUND", scenario: "normal", difficulty: 1, previousStatus: "fulfilled", prompt: "Write an email confirming final payment has been received.", tags: ["final-payment"] });
-  for (let i = 0; i < 4; i++) scenarios.push({ status: "paid-in-full", direction: "INBOUND", scenario: "tricky", difficulty: 2, previousStatus: "fulfilled", prompt: "Write a final payment confirmation using indirect language.", tags: ["final-payment", "indirect"] });
-  for (let i = 0; i < 2; i++) scenarios.push({ status: "paid-in-full", direction: "INBOUND", scenario: "followup", difficulty: 3, previousStatus: "fulfilled", threadContext: [{ direction: "OUTBOUND", subject: "Final payment", body: "Sending the remaining balance now." }], prompt: "Write a brief acknowledgment.", tags: ["final-payment", "followup"] });
-  for (let i = 0; i < 2; i++) scenarios.push({ status: "paid-in-full", direction: "INBOUND", scenario: "edge", difficulty: 4, previousStatus: "fulfilled", prompt: "Write about receiving final payment with some additional notes about future bookings.", tags: ["final-payment", "edge"] });
+  // *** NEW: Quoted via ATTACHMENT (no $ in body) ***
+  for (let i = 0; i < 10; i++) scenarios.push(
+    scenario("quote-received", "quoted", "budget-unknown", ["review-quote"],
+      "INBOUND", "normal", 2,
+      "Write where vendor says 'Attached is our proposal' or 'See the estimate attached' or 'I've attached our pricing package'. NO dollar amounts in the email body itself - pricing is in attachment.",
+      ["pricing", "attachment"],
+      { previousStatus: "rfq-sent" })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("quote-received", "quoted", "budget-unknown", ["review-quote"],
+      "INBOUND", "tricky", 3,
+      "Vendor says 'PDF attached with our rates' or 'See quote document' - use various terms for attachment. NO dollar amounts in body.",
+      ["pricing", "attachment", "indirect"],
+      { previousStatus: "rfq-sent" })
+  );
 
-  // --- OUTBOUND SCENARIOS (From User/Planner) ---
+  // *** NEW: Quoted + within-budget (quote <= stated budget) ***
+  for (let i = 0; i < 10; i++) scenarios.push(
+    scenario("quote-received", "quoted", "within-budget", ["review-quote"],
+      "INBOUND", "normal", 1,
+      "Write a quote email with pricing of $1,200. The previous context shows planner's budget was $1,500.",
+      ["pricing", "within-budget"],
+      { previousStatus: "rfq-sent", threadContext: [{ direction: "OUTBOUND", subject: "Event inquiry", body: "We're planning a corporate event March 15th for 100 guests. Our budget is around $1,500. What are your rates?" }] })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("quote-received", "quoted", "within-budget", ["review-quote"],
+      "INBOUND", "tricky", 2,
+      "Quote of $800 when planner mentioned $1,000 budget. Make the quote clearly under budget.",
+      ["pricing", "within-budget", "clear"],
+      { previousStatus: "rfq-sent", threadContext: [{ direction: "OUTBOUND", subject: "Catering quote?", body: "Looking for catering for 50 people. Budget is $1,000 max." }] })
+  );
 
-  // RFQ-sent - Outbound (first contact with vendor)
-  for (let i = 0; i < 40; i++) scenarios.push({ status: "rfq-sent", direction: "OUTBOUND", scenario: "normal", difficulty: 1, previousStatus: "shortlisted", prompt: "Write an inquiry email asking about availability and pricing for an event.", tags: ["inquiry", "rfq"] });
-  for (let i = 0; i < 10; i++) scenarios.push({ status: "rfq-sent", direction: "OUTBOUND", scenario: "tricky", difficulty: 2, previousStatus: "shortlisted", prompt: "Write a subtle inquiry that asks about services without explicitly mentioning pricing.", tags: ["inquiry", "indirect"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "rfq-sent", direction: "OUTBOUND", scenario: "followup", difficulty: 3, previousStatus: "shortlisted", threadContext: [{ direction: "INBOUND", subject: "Welcome!", body: "Thanks for reaching out. How can we help?" }], prompt: "Write a reply asking about their services for a specific event.", tags: ["inquiry", "followup"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "rfq-sent", direction: "OUTBOUND", scenario: "edge", difficulty: 4, previousStatus: "shortlisted", prompt: "Write an inquiry that also mentions having looked at competitors.", tags: ["inquiry", "edge"] });
+  // *** NEW: Quoted + over-budget (quote > stated budget) ***
+  for (let i = 0; i < 10; i++) scenarios.push(
+    scenario("quote-received", "quoted", "over-budget", ["review-quote"],
+      "INBOUND", "normal", 1,
+      "Write a quote email with pricing of $2,200. The previous context shows planner's budget was $1,500. Quote is over budget.",
+      ["pricing", "over-budget"],
+      { previousStatus: "rfq-sent", threadContext: [{ direction: "OUTBOUND", subject: "Event inquiry", body: "Planning a wedding March 15th for 100 guests. Our budget is around $1,500. What are your packages?" }] })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("quote-received", "quoted", "over-budget", ["review-quote"],
+      "INBOUND", "tricky", 2,
+      "Quote of $3,000 when planner mentioned budget 'around $2k'. Significantly over budget.",
+      ["pricing", "over-budget", "significant"],
+      { previousStatus: "rfq-sent", threadContext: [{ direction: "OUTBOUND", subject: "Photography quote", body: "Need a photographer for our event. Budget is around $2k." }] })
+  );
 
-  // Confirmed - Outbound (planner accepts quote/offer)
-  for (let i = 0; i < 25; i++) scenarios.push({ status: "confirmed", direction: "OUTBOUND", scenario: "normal", difficulty: 1, previousStatus: "quote-received", prompt: "Write an email confirming the booking from the planner's side. Clear 'let's proceed'.", tags: ["booking", "proceed"] });
-  for (let i = 0; i < 8; i++) scenarios.push({ status: "confirmed", direction: "OUTBOUND", scenario: "tricky", difficulty: 2, previousStatus: "negotiating", prompt: "Write a confirmation using casual or indirect language.", tags: ["booking", "indirect"] });
-  for (let i = 0; i < 4; i++) scenarios.push({ status: "confirmed", direction: "OUTBOUND", scenario: "followup", difficulty: 3, previousStatus: "quote-received", threadContext: [{ direction: "INBOUND", subject: "Quote", body: "Our package is $1,500 for the day." }], prompt: "Write a short reply accepting the quote.", tags: ["booking", "followup"] });
-  for (let i = 0; i < 4; i++) scenarios.push({ status: "confirmed", direction: "OUTBOUND", scenario: "edge", difficulty: 4, previousStatus: "negotiating", prompt: "Write a conditional acceptance that includes caveats.", tags: ["booking", "edge"] });
+  // *** NEW: Soft budget phrasing (should be budget-unknown) ***
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("quote-received", "quoted", "budget-unknown", ["review-quote"],
+      "INBOUND", "edge", 4,
+      "Quote of $1,800 when planner said vague budget like 'aiming for around $1.5k' or 'hoping to keep it under $2k maybe'. Soft budget = budget-unknown.",
+      ["pricing", "soft-budget"],
+      { previousStatus: "rfq-sent", threadContext: [{ direction: "OUTBOUND", subject: "DJ inquiry", body: "We're looking for a DJ. Hoping to keep it around $1.5k or so if possible." }] })
+  );
 
-  // Negotiating - Outbound (planner negotiates after receiving quote)
-  for (let i = 0; i < 25; i++) scenarios.push({ status: "negotiating", direction: "OUTBOUND", scenario: "normal", difficulty: 1, previousStatus: "quote-received", prompt: "Write an email asking for a discount or negotiating terms.", tags: ["negotiation", "discount"] });
-  for (let i = 0; i < 10; i++) scenarios.push({ status: "negotiating", direction: "OUTBOUND", scenario: "tricky", difficulty: 2, previousStatus: "quote-received", prompt: "Write a subtle negotiation without explicitly asking for a discount.", tags: ["negotiation", "indirect"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "negotiating", direction: "OUTBOUND", scenario: "followup", difficulty: 3, previousStatus: "quote-received", threadContext: [{ direction: "INBOUND", subject: "Quote", body: "The total would be $2,500." }], prompt: "Write a reply pushing back on the price.", tags: ["negotiation", "followup"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "negotiating", direction: "OUTBOUND", scenario: "edge", difficulty: 4, previousStatus: "quote-received", prompt: "Write a negotiation that could be seen as either accepting or rejecting.", tags: ["negotiation", "edge"] });
+  // Quoted + negotiating (Active price discussion)
+  for (let i = 0; i < 15; i++) scenarios.push(
+    scenario("negotiating", "quoted", "negotiating", [],
+      "OUTBOUND", "normal", 1,
+      "Write an email asking for a discount or negotiating terms. Push back on the quoted price.",
+      ["negotiation", "discount"],
+      { previousStatus: "quote-received" })
+  );
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("negotiating", "quoted", "negotiating", [],
+      "OUTBOUND", "tricky", 2,
+      "Write subtle negotiation without explicitly asking for discount - mention budget constraints or compare to competitors.",
+      ["negotiation", "indirect"],
+      { previousStatus: "quote-received" })
+  );
+  for (let i = 0; i < 6; i++) scenarios.push(
+    scenario("negotiating", "quoted", "negotiating", ["reply-needed"],
+      "INBOUND", "normal", 1,
+      "Vendor responds to negotiation with counter-offer AND asks a question. Include a NEW price different from original, and ask something like 'Would that work?'",
+      ["negotiation", "counter-offer"],
+      { previousStatus: "quote-received" })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("negotiating", "quoted", "negotiating", [],
+      "INBOUND", "tricky", 2,
+      "Vendor responds to negotiation discussing terms/flexibility without committing to new price. No question asked.",
+      ["negotiation", "terms"],
+      { previousStatus: "quote-received" })
+  );
 
-  // Contracted - Outbound (planner confirms they've SIGNED the contract)
-  for (let i = 0; i < 20; i++) scenarios.push({ status: "contracted", direction: "OUTBOUND", scenario: "normal", difficulty: 1, previousStatus: "confirmed", prompt: "Write an email confirming you've signed and returned the contract. Be clear it's done, not pending.", tags: ["contract", "signed"] });
-  for (let i = 0; i < 8; i++) scenarios.push({ status: "contracted", direction: "OUTBOUND", scenario: "tricky", difficulty: 2, previousStatus: "confirmed", prompt: "Write about having completed the contract using indirect terms like 'paperwork is done' or 'we're official'.", tags: ["contract", "indirect"] });
-  for (let i = 0; i < 4; i++) scenarios.push({ status: "contracted", direction: "OUTBOUND", scenario: "followup", difficulty: 3, previousStatus: "confirmed", threadContext: [{ direction: "INBOUND", subject: "Contract", body: "Please sign and return." }], prompt: "Write a reply confirming you've signed and sent it back.", tags: ["contract", "followup"] });
-  // NOTE: Questions about contract = still "confirmed", not "contracted"
-  for (let i = 0; i < 3; i++) scenarios.push({ status: "contracted", direction: "OUTBOUND", scenario: "edge", difficulty: 4, previousStatus: "confirmed", prompt: "Write about a signed contract with a note about a minor detail that needs clarification (but contract IS signed).", tags: ["contract", "edge"] });
+  // Quoted + date-held (with pay-deposit action - FIXED)
+  for (let i = 0; i < 10; i++) scenarios.push(
+    scenario("quote-received", "quoted", "date-held", ["approve-booking", "pay-deposit"],
+      "INBOUND", "normal", 1,
+      "Write where vendor says they're HOLDING the date but NEED A DEPOSIT by a specific deadline. Example: 'I've penciled you in but need a deposit by Friday to hold it.'",
+      ["date-hold", "needs-deposit"],
+      { previousStatus: "quote-received" })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("quote-received", "quoted", "date-held", ["approve-booking"],
+      "INBOUND", "tricky", 2,
+      "Vendor holding date but just needs a decision, not specifically deposit. 'Can hold until Monday, let me know!' No deposit mentioned.",
+      ["date-hold", "decision-only"],
+      { previousStatus: "quote-received" })
+  );
 
-  // Deposit-paid - Outbound (planner sends deposit after contract)
-  for (let i = 0; i < 15; i++) scenarios.push({ status: "deposit-paid", direction: "OUTBOUND", scenario: "normal", difficulty: 1, previousStatus: "contracted", prompt: "Write an email notifying that a deposit has been sent.", tags: ["payment", "sent"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "deposit-paid", direction: "OUTBOUND", scenario: "tricky", difficulty: 2, previousStatus: "contracted", prompt: "Write about sending payment using indirect language.", tags: ["payment", "indirect"] });
-  for (let i = 0; i < 3; i++) scenarios.push({ status: "deposit-paid", direction: "OUTBOUND", scenario: "followup", difficulty: 3, previousStatus: "contracted", threadContext: [{ direction: "INBOUND", subject: "Deposit needed", body: "Please send the 50% deposit to secure." }], prompt: "Write a reply confirming you've sent it.", tags: ["payment", "followup"] });
-  for (let i = 0; i < 3; i++) scenarios.push({ status: "deposit-paid", direction: "OUTBOUND", scenario: "edge", difficulty: 4, previousStatus: "contracted", prompt: "Write about a payment with questions about the amount.", tags: ["payment", "edge"] });
+  // ============================================
+  // BOOKED - Committed to work together
+  // ============================================
 
-  // Cancelled - Outbound (planner cancels after confirmation)
-  for (let i = 0; i < 20; i++) scenarios.push({ status: "cancelled", direction: "OUTBOUND", scenario: "normal", difficulty: 1, previousStatus: "confirmed", prompt: "Write an email cancelling the booking from the planner's side.", tags: ["cancellation"] });
-  for (let i = 0; i < 7; i++) scenarios.push({ status: "cancelled", direction: "OUTBOUND", scenario: "tricky", difficulty: 2, previousStatus: "confirmed", prompt: "Write a cancellation using polite, indirect language.", tags: ["cancellation", "indirect"] });
-  for (let i = 0; i < 4; i++) scenarios.push({ status: "cancelled", direction: "OUTBOUND", scenario: "followup", difficulty: 3, previousStatus: "confirmed", threadContext: [{ direction: "INBOUND", subject: "All set!", body: "We're confirmed for March 15th!" }], prompt: "Write a reply cancelling despite the confirmation.", tags: ["cancellation", "reversal"] });
-  for (let i = 0; i < 5; i++) scenarios.push({ status: "cancelled", direction: "OUTBOUND", scenario: "edge", difficulty: 4, previousStatus: "contracted", prompt: "Write a cancellation that leaves the door open for future work.", tags: ["cancellation", "edge"] });
+  // Booked + verbal-confirmed (clear booking language)
+  for (let i = 0; i < 20; i++) scenarios.push(
+    scenario("confirmed", "booked", "verbal-confirmed", [],
+      "OUTBOUND", "normal", 1,
+      "Write where planner confirms booking. Use clear phrases: 'let's proceed', 'we'd like to book you', 'go ahead and lock in the date', 'we're confirming'.",
+      ["booking", "proceed"],
+      { previousStatus: "quote-received" })
+  );
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("confirmed", "booked", "verbal-confirmed", [],
+      "OUTBOUND", "tricky", 2,
+      "Casual booking confirmation: 'sounds perfect, count us in!' or 'yes, let's do it!' Clear commitment despite casual tone.",
+      ["booking", "casual"],
+      { previousStatus: "negotiating" })
+  );
+  for (let i = 0; i < 15; i++) scenarios.push(
+    scenario("confirmed", "booked", "verbal-confirmed", [],
+      "INBOUND", "normal", 1,
+      "Vendor confirms booking is SET after planner accepted. Use: 'you're booked!', 'see you March 15th!', 'confirmed for your date!'",
+      ["confirmation", "vendor-confirms"],
+      { previousStatus: "negotiating" })
+  );
+  for (let i = 0; i < 6; i++) scenarios.push(
+    scenario("confirmed", "booked", "verbal-confirmed", [],
+      "INBOUND", "tricky", 2,
+      "Vendor confirms booking casually: 'Awesome, see you there!' or 'Can't wait!' Clear this is after planner accepted.",
+      ["confirmation", "casual"],
+      { previousStatus: "quote-received" })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("confirmed", "booked", "verbal-confirmed", [],
+      "INBOUND", "followup", 3,
+      "Short reply accepting booking: 'Great, you're booked!' or 'Perfect, see you then!'",
+      ["confirmation", "followup"],
+      { previousStatus: "negotiating", threadContext: [{ direction: "OUTBOUND", subject: "Let's proceed!", body: "We'd like to book you for March 15th!" }] })
+  );
+
+  // *** NEW: Messy/ambiguous booking scenarios ***
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("confirmed", "booked", "verbal-confirmed", ["pay-deposit"],
+      "INBOUND", "edge", 4,
+      "Vendor says 'Confirmed pending deposit' or 'You're on the calendar once deposit clears'. This IS booked despite 'pending' language - they're committed.",
+      ["booking", "pending-language"],
+      { previousStatus: "quote-received" })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("confirmed", "booked", "verbal-confirmed", [],
+      "OUTBOUND", "edge", 4,
+      "Planner says 'Let's do it, send the invoice' or 'We're in, what's next?' - clear commitment with next-step request.",
+      ["booking", "with-next-step"],
+      { previousStatus: "quote-received" })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("confirmed", "booked", "verbal-confirmed", [],
+      "INBOUND", "edge", 4,
+      "WhatsApp-style short reply after planner booked: 'Done!' or 'Got it, locked in' or just '👍 see you then'. Very brief but clear confirmation.",
+      ["booking", "short-reply"],
+      { previousStatus: "negotiating", threadContext: [{ direction: "OUTBOUND", subject: "Booking", body: "Let's go ahead with March 15th!" }] })
+  );
+
+  // *** TRICKY: "Pencil in" language - this is date-held, NOT booked ***
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("quote-received", "quoted", "date-held", ["approve-booking"],
+      "INBOUND", "edge", 4,
+      "Vendor says 'We can pencil you in' or 'I'll tentatively hold the date'. This is NOT booked - it's date-held. No firm commitment yet.",
+      ["edge", "pencil-not-booked"],
+      { previousStatus: "quote-received" })
+  );
+
+  // Booked + contract-sent
+  for (let i = 0; i < 10; i++) scenarios.push(
+    scenario("confirmed", "booked", "contract-sent", ["sign-contract"],
+      "INBOUND", "normal", 1,
+      "Vendor sends contract for signature: 'attached is the contract' or 'please review and sign'. Contract NOT yet signed.",
+      ["contract", "sent"],
+      { previousStatus: "confirmed" })
+  );
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("confirmed", "booked", "contract-sent", ["sign-contract"],
+      "INBOUND", "tricky", 2,
+      "Vendor mentions sending paperwork using informal terms: 'paperwork attached', 'sending the agreement'. Not signed yet.",
+      ["contract", "informal"],
+      { previousStatus: "confirmed" })
+  );
+
+  // Booked + contract-signed
+  for (let i = 0; i < 12; i++) scenarios.push(
+    scenario("contracted", "booked", "contract-signed", [],
+      "OUTBOUND", "normal", 1,
+      "Planner confirms they've SIGNED and returned the contract. Clear it's done, not pending.",
+      ["contract", "signed"],
+      { previousStatus: "confirmed" })
+  );
+  for (let i = 0; i < 6; i++) scenarios.push(
+    scenario("contracted", "booked", "contract-signed", [],
+      "OUTBOUND", "tricky", 2,
+      "Contract completion in indirect terms: 'paperwork is done' or 'we're official now'.",
+      ["contract", "indirect"],
+      { previousStatus: "confirmed" })
+  );
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("contracted", "booked", "contract-signed", [],
+      "INBOUND", "normal", 1,
+      "Vendor confirms contract is SIGNED: 'Contract is signed', 'agreement is finalized', 'paperwork is complete'.",
+      ["contract", "executed"],
+      { previousStatus: "confirmed" })
+  );
+  for (let i = 0; i < 4; i++) scenarios.push(
+    scenario("contracted", "booked", "contract-signed", [],
+      "INBOUND", "followup", 3,
+      "Vendor confirms receipt of signed contract from planner.",
+      ["contract", "received"],
+      { previousStatus: "confirmed", threadContext: [{ direction: "OUTBOUND", subject: "Signed contract", body: "Just sent back the signed contract!" }] })
+  );
+
+  // Booked + deposit-requested
+  for (let i = 0; i < 12; i++) scenarios.push(
+    scenario("contracted", "booked", "deposit-requested", ["pay-deposit"],
+      "INBOUND", "normal", 1,
+      "Vendor requests deposit: 'Please send the 50% deposit' or 'deposit is due to secure your date'. Clear request.",
+      ["deposit", "requested"],
+      { previousStatus: "contracted" })
+  );
+
+  // Booked + deposit-paid
+  for (let i = 0; i < 12; i++) scenarios.push(
+    scenario("deposit-paid", "booked", "deposit-paid", [],
+      "OUTBOUND", "normal", 1,
+      "Planner notifies deposit has been sent: 'Just transferred the deposit' or 'Payment sent!'",
+      ["payment", "sent"],
+      { previousStatus: "contracted" })
+  );
+  for (let i = 0; i < 4; i++) scenarios.push(
+    scenario("deposit-paid", "booked", "deposit-paid", [],
+      "OUTBOUND", "tricky", 2,
+      "Sending payment using indirect language: 'Check is in the mail' or 'Transferred via the link you sent'.",
+      ["payment", "indirect"],
+      { previousStatus: "contracted" })
+  );
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("deposit-paid", "booked", "deposit-paid", [],
+      "INBOUND", "normal", 1,
+      "Vendor confirms receipt of deposit: 'Got the deposit, thank you!' or 'Payment received!'",
+      ["payment", "received"],
+      { previousStatus: "contracted" })
+  );
+  for (let i = 0; i < 3; i++) scenarios.push(
+    scenario("deposit-paid", "booked", "deposit-paid", [],
+      "INBOUND", "followup", 3,
+      "Short acknowledgment of receiving payment.",
+      ["payment", "followup"],
+      { previousStatus: "contracted", threadContext: [{ direction: "OUTBOUND", subject: "Deposit sent", body: "Just transferred the deposit!" }] })
+  );
+
+  // Booked + awaiting-details
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("contracted", "booked", "awaiting-details", ["provide-details", "reply-needed"],
+      "INBOUND", "normal", 1,
+      "Vendor asks for event details: timeline, setup requirements, specific preferences. They're booked but need more info. Must include a question.",
+      ["logistics", "details-needed"],
+      { previousStatus: "deposit-paid" })
+  );
+
+  // ============================================
+  // COMPLETED - Service delivered
+  // ============================================
+
+  // Completed + fulfilled
+  for (let i = 0; i < 12; i++) scenarios.push(
+    scenario("fulfilled", "completed", "fulfilled", [],
+      "INBOUND", "normal", 1,
+      "Post-event thank you from vendor. Event HAS HAPPENED. Reference 'yesterday', 'last weekend', 'your beautiful wedding'.",
+      ["post-event", "thanks"],
+      { previousStatus: "deposit-paid" })
+  );
+  for (let i = 0; i < 4; i++) scenarios.push(
+    scenario("fulfilled", "completed", "fulfilled", [],
+      "INBOUND", "tricky", 2,
+      "Subtle post-event message referencing completed event without explicit 'thank you'.",
+      ["post-event", "indirect"],
+      { previousStatus: "deposit-paid" })
+  );
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("fulfilled", "completed", "fulfilled", [],
+      "OUTBOUND", "normal", 1,
+      "Thank you from planner to vendor after event: 'You were amazing yesterday!' or 'Thanks for making our day special!'",
+      ["post-event", "planner-thanks"],
+      { previousStatus: "deposit-paid" })
+  );
+
+  // Completed + invoice-sent
+  for (let i = 0; i < 10; i++) scenarios.push(
+    scenario("fulfilled", "completed", "invoice-sent", ["pay-balance"],
+      "INBOUND", "normal", 1,
+      "Vendor sends final invoice after event. Include remaining balance amount like 'remaining $500 due'.",
+      ["invoice", "final-payment"],
+      { previousStatus: "fulfilled" })
+  );
+
+  // Completed + paid-in-full
+  for (let i = 0; i < 8; i++) scenarios.push(
+    scenario("paid-in-full", "completed", "paid-in-full", [],
+      "INBOUND", "normal", 1,
+      "Vendor confirms final payment received: 'Payment received', 'all paid up', 'balance cleared'.",
+      ["final-payment", "complete"],
+      { previousStatus: "fulfilled" })
+  );
+  for (let i = 0; i < 4; i++) scenarios.push(
+    scenario("paid-in-full", "completed", "paid-in-full", [],
+      "OUTBOUND", "normal", 1,
+      "Planner notifies final payment sent.",
+      ["final-payment", "sent"],
+      { previousStatus: "fulfilled" })
+  );
+
+  // ============================================
+  // CANCELLED - Relationship terminated
+  // ============================================
+
+  // Cancelled (from vendor)
+  for (let i = 0; i < 12; i++) scenarios.push(
+    scenario("cancelled", "cancelled", null, [],
+      "INBOUND", "normal", 1,
+      "Vendor cancels clearly: 'unfortunately we can no longer', 'have to cancel', 'won't be able to serve you'.",
+      ["cancellation", "vendor"],
+      { previousStatus: "confirmed" })
+  );
+  for (let i = 0; i < 6; i++) scenarios.push(
+    scenario("cancelled", "cancelled", null, [],
+      "INBOUND", "tricky", 2,
+      "Vendor cancels using apologetic, indirect language without word 'cancel'.",
+      ["cancellation", "indirect"],
+      { previousStatus: "confirmed" })
+  );
+  for (let i = 0; i < 4; i++) scenarios.push(
+    scenario("cancelled", "cancelled", null, [],
+      "INBOUND", "edge", 4,
+      "Cancellation using 'fulfill' negatively: 'cannot fulfill your booking'. Clearly a cancellation.",
+      ["cancellation", "edge"],
+      { previousStatus: "contracted" })
+  );
+
+  // Cancelled (from planner)
+  for (let i = 0; i < 12; i++) scenarios.push(
+    scenario("cancelled", "cancelled", null, [],
+      "OUTBOUND", "normal", 1,
+      "Planner cancels the booking.",
+      ["cancellation", "planner"],
+      { previousStatus: "confirmed" })
+  );
+  for (let i = 0; i < 4; i++) scenarios.push(
+    scenario("cancelled", "cancelled", null, [],
+      "OUTBOUND", "tricky", 2,
+      "Polite, indirect cancellation language.",
+      ["cancellation", "polite"],
+      { previousStatus: "confirmed" })
+  );
+  for (let i = 0; i < 3; i++) scenarios.push(
+    scenario("cancelled", "cancelled", null, [],
+      "OUTBOUND", "followup", 3,
+      "Cancelling despite recent confirmation.",
+      ["cancellation", "reversal"],
+      { previousStatus: "confirmed", threadContext: [{ direction: "INBOUND", subject: "All set!", body: "We're confirmed for March 15th!" }] })
+  );
+
+  // ============================================
+  // EDGE CASES - Things that should NOT change status
+  // ============================================
+
+  // Empathy is NOT cancellation
+  for (let i = 0; i < 6; i++) scenarios.push(
+    scenario("confirmed", "booked", "verbal-confirmed", [],
+      "INBOUND", "edge", 4,
+      "Vendor expresses empathy: 'I understand plans can change', 'flexibility if needed'. NOT a cancellation - still booked. No question asked.",
+      ["edge", "empathy-not-cancel"],
+      { previousStatus: "confirmed" })
+  );
+
+  // Question about deposit is NOT deposit-paid
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("contracted", "booked", "deposit-requested", ["pay-deposit", "reply-needed"],
+      "INBOUND", "edge", 4,
+      "Vendor asks ABOUT deposit: 'When can you send the deposit?', 'Did you get my invoice?' - deposit NOT yet paid. Includes question.",
+      ["edge", "deposit-question"],
+      { previousStatus: "contracted" })
+  );
+
+  // Positive language with price is NOT booking
+  for (let i = 0; i < 6; i++) scenarios.push(
+    scenario("quote-received", "quoted", "budget-unknown", ["review-quote"],
+      "INBOUND", "edge", 4,
+      "Vendor uses positive language WITH a price but NO booking commitment: 'sounds great! Our rate is $1,500' or 'happy to help! $2,000 for the day'. This is QUOTED, not booked.",
+      ["edge", "positive-not-booked"],
+      { previousStatus: "rfq-sent" })
+  );
+
+  // ============================================
+  // NEEDS-REVIEW - Ambiguous cases for AI escape hatch
+  // ============================================
+
+  // Ambiguous: "confirmed" but unclear what's confirmed
+  for (let i = 0; i < 5; i++) scenarios.push(
+    scenario("quote-received", "quoted", null, ["needs-review"],
+      "INBOUND", "edge", 4,
+      "Vendor uses word 'confirmed' but context is UNCLEAR - could mean availability confirmed or booking confirmed. Example: 'Confirmed, I can do March 15th' (is this availability or booking?). AI should be uncertain.",
+      ["ambiguous", "confirmed-unclear"],
+      { previousStatus: "rfq-sent" })
+  );
+
+  // Ambiguous: Multiple dates mentioned
+  for (let i = 0; i < 4; i++) scenarios.push(
+    scenario("quote-received", "quoted", null, ["needs-review"],
+      "INBOUND", "edge", 4,
+      "Vendor mentions MULTIPLE dates making it unclear which is relevant: 'I'm free March 15th and also the 22nd, either works. Price is $1,500.' Hard to know which date is being quoted.",
+      ["ambiguous", "multiple-dates"],
+      { previousStatus: "rfq-sent" })
+  );
+
+  // Ambiguous: Contract mentioned but unclear if sent or signed
+  for (let i = 0; i < 4; i++) scenarios.push(
+    scenario("confirmed", "booked", null, ["needs-review"],
+      "INBOUND", "edge", 4,
+      "Vendor mentions 'contract' but UNCLEAR if it's being sent or already signed: 'Got the contract sorted' or 'Contract is good'. Is it sent or signed? AI should flag for review.",
+      ["ambiguous", "contract-unclear"],
+      { previousStatus: "confirmed" })
+  );
+
+  // Ambiguous: Forwarded email with unclear speaker
+  for (let i = 0; i < 4; i++) scenarios.push(
+    scenario("quote-received", "quoted", null, ["needs-review"],
+      "INBOUND", "edge", 4,
+      "Write a FORWARDED email where it's unclear who is speaking - contains quoted text from both planner and vendor. Include 'FW:' or '------Forwarded message------'. Hard to determine current state.",
+      ["ambiguous", "forwarded"],
+      { previousStatus: "rfq-sent" })
+  );
+
+  // Ambiguous: Sarcasm or unclear tone
+  for (let i = 0; i < 3; i++) scenarios.push(
+    scenario("quote-received", "quoted", null, ["needs-review"],
+      "INBOUND", "edge", 4,
+      "Response where tone is unclear - could be acceptance or rejection: 'Sure, $3,000, why not' or 'Great, another client who wants a discount'. Sarcastic? Genuine? AI should be uncertain.",
+      ["ambiguous", "unclear-tone"],
+      { previousStatus: "rfq-sent" })
+  );
 
   return scenarios;
 }
@@ -319,8 +834,13 @@ export async function generateTestEmails(
             direction: scenario.direction,
             threadContext: scenario.threadContext || undefined,
             hasThreadContext: !!scenario.threadContext,
-            expectedStatus: scenario.status,
+            // V1 model (LEGACY - for backward compat only)
+            expectedStatus: scenario.legacyStatus,
             previousStatus: scenario.previousStatus || null,
+            // V2 model (primary/sub/actions) - THE ACTUAL TEST EXPECTATIONS
+            expectedPrimaryStatus: scenario.primaryStatus,
+            expectedSubStatus: scenario.subStatus,
+            expectedActions: scenario.actions,
             scenario: scenario.scenario,
             difficulty: scenario.difficulty,
             tags: scenario.tags,
@@ -439,7 +959,7 @@ Reliability: ${persona.reliability}
 Price Point: ${persona.pricePoint}
 
 DIRECTION: ${scenario.direction}
-EXPECTED STATUS: ${scenario.status}
+EXPECTED STATUS: ${scenario.primaryStatus}/${scenario.subStatus} (actions: ${scenario.actions.join(", ") || "none"})
 DIFFICULTY: ${scenario.scenario} (${scenario.difficulty}/4)
 ${threadContext}
 INSTRUCTIONS: ${scenario.prompt}
@@ -506,15 +1026,15 @@ function generateEmailTemplate(
     },
   };
 
-  const key = `${scenario.status}-${scenario.direction}`;
+  const key = `${scenario.legacyStatus}-${scenario.direction}`;
   const template = templates[key] || {
-    subject: `Re: ${scenario.status}`,
-    body: `This is a test email for ${scenario.status} (${scenario.direction}).`,
+    subject: `Re: ${scenario.legacyStatus}`,
+    body: `This is a test email for ${scenario.primaryStatus} (${scenario.direction}).`,
   };
 
   return {
     ...template,
-    notes: `Template-generated for ${scenario.status} (${scenario.scenario})`,
+    notes: `Template-generated for ${scenario.primaryStatus}/${scenario.subStatus} (${scenario.scenario})`,
   };
 }
 

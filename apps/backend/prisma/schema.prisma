@@ -664,9 +664,15 @@ model TestCase {
   threadContext   Json?            // Previous messages array
   hasThreadContext Boolean @default(false)
   
-  // Ground truth
+  // Ground truth (v1 model - single status)
   expectedStatus  String
   previousStatus  String?          // Status before this email arrived (for progression context)
+
+  // Ground truth (v2 model - primary/sub/actions)
+  expectedPrimaryStatus  String?   // contacting, quoted, booked, completed, cancelled
+  expectedSubStatus      String?   // Contextual substatus
+  expectedActions        String[]  // Action flags like reply-needed, review-quote, etc.
+
   scenario        String           // "normal", "tricky", "followup", "edge"
   difficulty      Int              // 1-4
   
@@ -718,12 +724,20 @@ model TestRun {
   model           String
   promptSnapshot  String   @db.Text  // Full prompt used (for reproducibility)
   
-  // Aggregate stats
+  // Aggregate stats (v1 model)
   totalCases      Int      @default(0)
   passed          Int      @default(0)
   failed          Int      @default(0)
   accuracy        Float    @default(0)
-  
+
+  // Aggregate stats (v2 model)
+  primaryPassed      Int?
+  primaryAccuracy    Float?
+  subPassed          Int?
+  subAccuracy        Float?
+  actionsPassed      Int?
+  actionsAccuracy    Float?
+
   // Performance
   avgLatencyMs    Float    @default(0)
   totalTokens     Int      @default(0)
@@ -744,24 +758,32 @@ model TestRun {
 // Individual test result
 model TestResult {
   id              String   @id @default(cuid())
-  
+
   runId           String
   run             TestRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
   caseId          String
   case            TestCase @relation(fields: [caseId], references: [id])
-  
-  // Result
+
+  // Result (v1 model)
   passed          Boolean
   expectedStatus  String
   detectedStatus  String?
   confidence      Float?
   reasoning       String?  @db.Text
-  
+
+  // Result (v2 model - primary/sub/actions)
+  detectedPrimaryStatus  String?
+  detectedSubStatus      String?
+  detectedActions        String[]
+  primaryPassed          Boolean?
+  subPassed              Boolean?
+  actionsPassed          Boolean?
+
   // Debug info
   rawResponse     String?  @db.Text
   latencyMs       Int      @default(0)
   tokens          Int?
-  
+
   createdAt       DateTime @default(now())
 
   @@map("test_results")

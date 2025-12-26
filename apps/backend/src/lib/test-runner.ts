@@ -9,9 +9,18 @@ import { prisma } from "../db";
 import { buildStatusDetectionSystemPrompt } from "./status-detection-prompt";
 import { z } from "zod";
 
-// Zod schema for structured AI responses
-const AITestResponseSchema = z.object({
+// Zod schema for structured AI responses (v1 model)
+const AITestResponseSchemaV1 = z.object({
   currentStatus: z.string().nullable(),
+  confidence: z.number().min(0).max(1),
+  reasoning: z.string(),
+});
+
+// Zod schema for v2 model (primary/sub/actions)
+const AITestResponseSchemaV2 = z.object({
+  primaryStatus: z.enum(["contacting", "quoted", "booked", "completed", "cancelled"]),
+  subStatus: z.string().nullable(),
+  actionRequired: z.array(z.string()),
   confidence: z.number().min(0).max(1),
   reasoning: z.string(),
 });
@@ -62,32 +71,124 @@ function estimateRequestTokens(systemPrompt: string, userMessage: string, maxRes
   return inputTokens + maxResponseTokens;
 }
 
-// Calculate optimal concurrency based on rate limits
-function calculateConcurrency(
-  model: string,
-  estimatedTokensPerRequest: number,
-  batchSize: number
-): number {
-  const limits = getModelRateLimits(model);
+// Adaptive concurrency controller
+class AdaptiveConcurrency {
+  private model: string;
+  private limits: { tpm: number; rpm: number };
+  private currentConcurrency: number;
+  private minConcurrency = 3;
+  private maxConcurrency = 50;
 
-  // Calculate max concurrent based on TPM (tokens per minute)
-  // We want to complete batches within reasonable time, assume ~2s per request
-  // So in 60 seconds, we might make 30 batches
-  const maxConcurrentByTokens = Math.floor(limits.tpm / estimatedTokensPerRequest / 30);
+  // Rolling window for tracking (last 60 seconds)
+  private recentBatches: { tokens: number; requests: number; durationMs: number; timestamp: number; hadRateLimit: boolean }[] = [];
+  private windowMs = 60000; // 1 minute window
 
-  // Calculate max concurrent based on RPM
-  // With 60 seconds and ~2s per request, we can do about 30 requests per concurrent slot
-  const maxConcurrentByRequests = Math.floor(limits.rpm / 30);
+  constructor(model: string, initialEstimatedTokens: number) {
+    this.model = model;
+    this.limits = getModelRateLimits(model);
 
-  // Take the minimum and cap between 5 and 50
-  const optimal = Math.min(maxConcurrentByTokens, maxConcurrentByRequests, 50);
-  return Math.max(5, optimal);
+    // Start with aggressive initial concurrency
+    // Use 70% of limits initially (more aggressive than before)
+    const requestsPerSecond = (this.limits.rpm * 0.7) / 60;
+    const tokensPerSecond = (this.limits.tpm * 0.7) / 60;
+    const maxByRpm = Math.floor(requestsPerSecond * 2); // Assume ~2s per request
+    const maxByTpm = Math.floor(tokensPerSecond * 2 / initialEstimatedTokens);
+
+    this.currentConcurrency = Math.min(
+      Math.max(this.minConcurrency, Math.min(maxByRpm, maxByTpm)),
+      this.maxConcurrency
+    );
+
+    // For high-TPM models, start even more aggressive
+    if (this.limits.tpm >= 180000) {
+      this.currentConcurrency = Math.max(this.currentConcurrency, 15);
+    }
+
+    console.log(`[adaptive] Initial concurrency: ${this.currentConcurrency} (TPM: ${this.limits.tpm}, RPM: ${this.limits.rpm})`);
+  }
+
+  getConcurrency(): number {
+    return this.currentConcurrency;
+  }
+
+  // Record batch results and adjust concurrency
+  recordBatch(tokens: number, requests: number, durationMs: number, hadRateLimit: boolean): void {
+    const now = Date.now();
+
+    // Add this batch
+    this.recentBatches.push({ tokens, requests, durationMs, timestamp: now, hadRateLimit });
+
+    // Remove old batches outside window
+    this.recentBatches = this.recentBatches.filter(b => now - b.timestamp < this.windowMs);
+
+    // Calculate effective rates over the window
+    const windowDurationMs = this.recentBatches.length > 1
+      ? now - this.recentBatches[0].timestamp + this.recentBatches[0].durationMs
+      : durationMs;
+
+    const totalTokens = this.recentBatches.reduce((sum, b) => sum + b.tokens, 0);
+    const totalRequests = this.recentBatches.reduce((sum, b) => sum + b.requests, 0);
+    const anyRateLimits = this.recentBatches.some(b => b.hadRateLimit);
+
+    // Calculate effective rates (per minute)
+    const effectiveTPM = (totalTokens / windowDurationMs) * 60000;
+    const effectiveRPM = (totalRequests / windowDurationMs) * 60000;
+
+    // Calculate utilization percentages
+    const tpmUtilization = effectiveTPM / this.limits.tpm;
+    const rpmUtilization = effectiveRPM / this.limits.rpm;
+    const maxUtilization = Math.max(tpmUtilization, rpmUtilization);
+
+    const oldConcurrency = this.currentConcurrency;
+
+    if (hadRateLimit || anyRateLimits) {
+      // Back off significantly on rate limits
+      this.currentConcurrency = Math.max(
+        this.minConcurrency,
+        Math.floor(this.currentConcurrency * 0.6)
+      );
+      console.log(`[adaptive] Rate limit detected, reducing: ${oldConcurrency} → ${this.currentConcurrency}`);
+    } else if (maxUtilization < 0.5 && this.recentBatches.length >= 2) {
+      // Under 50% utilization with enough data - increase significantly
+      this.currentConcurrency = Math.min(
+        this.maxConcurrency,
+        Math.ceil(this.currentConcurrency * 1.5)
+      );
+      if (this.currentConcurrency !== oldConcurrency) {
+        console.log(`[adaptive] Low utilization (${(maxUtilization * 100).toFixed(0)}%), increasing: ${oldConcurrency} → ${this.currentConcurrency}`);
+      }
+    } else if (maxUtilization < 0.7 && this.recentBatches.length >= 2) {
+      // Under 70% - increase moderately
+      this.currentConcurrency = Math.min(
+        this.maxConcurrency,
+        this.currentConcurrency + 2
+      );
+      if (this.currentConcurrency !== oldConcurrency) {
+        console.log(`[adaptive] Moderate utilization (${(maxUtilization * 100).toFixed(0)}%), increasing: ${oldConcurrency} → ${this.currentConcurrency}`);
+      }
+    } else if (maxUtilization > 0.85) {
+      // Over 85% - slight decrease to stay safe
+      this.currentConcurrency = Math.max(
+        this.minConcurrency,
+        this.currentConcurrency - 1
+      );
+      if (this.currentConcurrency !== oldConcurrency) {
+        console.log(`[adaptive] High utilization (${(maxUtilization * 100).toFixed(0)}%), decreasing: ${oldConcurrency} → ${this.currentConcurrency}`);
+      }
+    }
+
+    // Log stats periodically
+    if (this.recentBatches.length % 5 === 0) {
+      console.log(`[adaptive] Stats - TPM: ${effectiveTPM.toFixed(0)}/${this.limits.tpm} (${(tpmUtilization * 100).toFixed(0)}%), RPM: ${effectiveRPM.toFixed(0)}/${this.limits.rpm} (${(rpmUtilization * 100).toFixed(0)}%), Concurrency: ${this.currentConcurrency}`);
+    }
+  }
 }
 
-type AITestResponseType = z.infer<typeof AITestResponseSchema>;
+type AITestResponseTypeV1 = z.infer<typeof AITestResponseSchemaV1>;
+type AITestResponseTypeV2 = z.infer<typeof AITestResponseSchemaV2>;
 
-// JSON Schema for OpenAI structured outputs
-const AI_RESPONSE_JSON_SCHEMA = {
+// JSON Schema for OpenAI structured outputs (v1 model)
+const AI_RESPONSE_JSON_SCHEMA_V1 = {
   name: "status_detection",
   strict: true,
   schema: {
@@ -101,6 +202,40 @@ const AI_RESPONSE_JSON_SCHEMA = {
     additionalProperties: false,
   },
 };
+
+// JSON Schema for OpenAI structured outputs (v2 model)
+const AI_RESPONSE_JSON_SCHEMA_V2 = {
+  name: "status_detection_v2",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      primaryStatus: {
+        type: "string",
+        enum: ["contacting", "quoted", "booked", "completed", "cancelled"],
+        description: "The primary status"
+      },
+      subStatus: { type: ["string", "null"], description: "The substatus, or null if unclear" },
+      actionRequired: {
+        type: "array",
+        items: { type: "string" },
+        description: "Action flags like reply-needed, review-quote, sign-contract, etc."
+      },
+      confidence: { type: "number", minimum: 0, maximum: 1, description: "Confidence score between 0 and 1" },
+      reasoning: { type: "string", description: "Explanation of why this status was detected" },
+    },
+    required: ["primaryStatus", "subStatus", "actionRequired", "confidence", "reasoning"],
+    additionalProperties: false,
+  },
+};
+
+// Detect if a prompt is v2 format (checks for v2-specific keywords)
+function isV2Prompt(systemPrompt: string): boolean {
+  return systemPrompt.includes("PRIMARY STATUS") ||
+    systemPrompt.includes("primaryStatus") ||
+    systemPrompt.includes("SUB-STATUS") ||
+    systemPrompt.includes("ACTION FLAGS");
+}
 
 export async function buildDefaultSystemPromptForTests(): Promise<string> {
   const statuses = await prisma.supplierStatus.findMany({
@@ -132,10 +267,18 @@ interface TestContext {
   previousStatus?: string; // Current status before this email arrived
 }
 
+// Unified response that can hold v1 or v2 data
 interface AITestResponse {
+  // V1 fields
   currentStatus: string | null;
+  // V2 fields
+  primaryStatus?: string;
+  subStatus?: string | null;
+  actionRequired?: string[];
+  // Common
   confidence: number;
   reasoning: string;
+  isV2: boolean;
 }
 
 /**
@@ -251,7 +394,7 @@ function buildTestUserMessage(testCase: TestContext): string {
 }
 
 /**
- * Call AI with test case
+ * Call AI with test case (supports both v1 and v2 prompts)
  */
 async function callTestAI(
   systemPrompt: string,
@@ -259,14 +402,19 @@ async function callTestAI(
   model: string,
   maxTokens: number,
   retries = 3
-): Promise<{ response: AITestResponse | null; latencyMs: number; tokens: number; rawResponse: string }> {
+): Promise<{ response: AITestResponse | null; latencyMs: number; tokens: number; rawResponse: string; hadRateLimit: boolean }> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return { response: null, latencyMs: 0, tokens: 0, rawResponse: "OPENAI_API_KEY not set" };
+    return { response: null, latencyMs: 0, tokens: 0, rawResponse: "OPENAI_API_KEY not set", hadRateLimit: false };
   }
 
   const userMessage = buildTestUserMessage(testCase);
   const startTime = Date.now();
+  let encounteredRateLimit = false;
+
+  // Detect v1 vs v2 prompt format
+  const useV2 = isV2Prompt(systemPrompt);
+  const jsonSchema = useV2 ? AI_RESPONSE_JSON_SCHEMA_V2 : AI_RESPONSE_JSON_SCHEMA_V1;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -286,7 +434,7 @@ async function callTestAI(
           max_completion_tokens: maxTokens,
           response_format: {
             type: "json_schema",
-            json_schema: AI_RESPONSE_JSON_SCHEMA,
+            json_schema: jsonSchema,
           },
         }),
       });
@@ -296,13 +444,17 @@ async function callTestAI(
       if (!res.ok) {
         const err = await res.text();
         // Retry on quota/rate limit errors
-        if ((res.status === 429 || err.includes("quota") || err.includes("rate")) && attempt < retries) {
-          const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
-          console.log(`[test-runner] Quota/rate error, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
+        const isRateLimit = res.status === 429 || err.includes("quota") || err.includes("rate");
+        if (isRateLimit) {
+          encounteredRateLimit = true;
+          if (attempt < retries) {
+            const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+            console.log(`[test-runner] Quota/rate error, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
         }
-        return { response: null, latencyMs, tokens: 0, rawResponse: `API Error: ${err}` };
+        return { response: null, latencyMs, tokens: 0, rawResponse: `API Error: ${err}`, hadRateLimit: encounteredRateLimit };
       }
 
       const data = await res.json() as {
@@ -314,12 +466,32 @@ async function callTestAI(
       const tokens = data.usage?.total_tokens || 0;
 
       if (!content) {
-        return { response: null, latencyMs, tokens, rawResponse: "Empty response from API" };
+        return { response: null, latencyMs, tokens, rawResponse: "Empty response from API", hadRateLimit: encounteredRateLimit };
       }
 
-      // With structured outputs, parsing should be guaranteed valid
-      const parsed = AITestResponseSchema.parse(JSON.parse(content));
-      return { response: parsed, latencyMs, tokens, rawResponse: content };
+      // Parse based on prompt version
+      if (useV2) {
+        const parsed = AITestResponseSchemaV2.parse(JSON.parse(content));
+        const response: AITestResponse = {
+          currentStatus: null, // V1 field not used
+          primaryStatus: parsed.primaryStatus,
+          subStatus: parsed.subStatus,
+          actionRequired: parsed.actionRequired,
+          confidence: parsed.confidence,
+          reasoning: parsed.reasoning,
+          isV2: true,
+        };
+        return { response, latencyMs, tokens, rawResponse: content, hadRateLimit: encounteredRateLimit };
+      } else {
+        const parsed = AITestResponseSchemaV1.parse(JSON.parse(content));
+        const response: AITestResponse = {
+          currentStatus: parsed.currentStatus,
+          confidence: parsed.confidence,
+          reasoning: parsed.reasoning,
+          isV2: false,
+        };
+        return { response, latencyMs, tokens, rawResponse: content, hadRateLimit: encounteredRateLimit };
+      }
     } catch (error) {
       if (attempt < retries) {
         const delay = Math.pow(2, attempt) * 1000;
@@ -332,13 +504,24 @@ async function callTestAI(
         response: null,
         latencyMs,
         tokens: 0,
-        rawResponse: `Error: ${error instanceof Error ? error.message : String(error)}`
+        rawResponse: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        hadRateLimit: encounteredRateLimit
       };
     }
   }
 
   // Should never reach here, but TypeScript needs it
-  return { response: null, latencyMs: Date.now() - startTime, tokens: 0, rawResponse: "Max retries exceeded" };
+  return { response: null, latencyMs: Date.now() - startTime, tokens: 0, rawResponse: "Max retries exceeded", hadRateLimit: encounteredRateLimit };
+}
+
+/**
+ * Compare action arrays (order-independent)
+ */
+function actionsMatch(expected: string[], detected: string[]): boolean {
+  if (expected.length !== detected.length) return false;
+  const sortedExpected = [...expected].sort();
+  const sortedDetected = [...detected].sort();
+  return sortedExpected.every((e, i) => e === sortedDetected[i]);
 }
 
 /**
@@ -384,20 +567,30 @@ export async function runTestSuite(params: {
 
   console.log(`[test-runner] Starting run ${run.id} with ${testCases.length} cases`);
 
+  // Detect if we're using v2 prompt
+  const isV2Run = isV2Prompt(prompt.systemPrompt);
+  console.log(`[test-runner] Prompt format: ${isV2Run ? "v2 (primary/sub/actions)" : "v1 (single status)"}`);
+
+  // V1 metrics
   let passed = 0;
   let failed = 0;
+  // V2 metrics
+  let primaryPassedCount = 0;
+  let subPassedCount = 0;
+  let actionsPassedCount = 0;
+
   let totalLatency = 0;
   let totalTokens = 0;
   let processed = 0;
 
-  // Calculate dynamic concurrency based on model rate limits
-  // Estimate tokens: system prompt + avg user message (~500 chars) + max response tokens
+  // Create adaptive concurrency controller
   const estimatedTokensPerRequest = estimateRequestTokens(prompt.systemPrompt, " ".repeat(500), maxTokens);
-  const CONCURRENCY = calculateConcurrency(model, estimatedTokensPerRequest, testCases.length);
-  const limits = getModelRateLimits(model);
-  console.log(`[test-runner] Model: ${model}, Est. tokens/req: ${estimatedTokensPerRequest}, Concurrency: ${CONCURRENCY} (TPM: ${limits.tpm}, RPM: ${limits.rpm})`);
+  const adaptiveConcurrency = new AdaptiveConcurrency(model, estimatedTokensPerRequest);
+  console.log(`[test-runner] Model: ${model}, Est. tokens/req: ${estimatedTokensPerRequest}`);
 
-  for (let i = 0; i < testCases.length; i += CONCURRENCY) {
+  let i = 0;
+  while (i < testCases.length) {
+    const CONCURRENCY = adaptiveConcurrency.getConcurrency();
     // Check if run has been paused or cancelled
     const currentRun = await prisma.testRun.findUnique({
       where: { id: run.id },
@@ -415,6 +608,7 @@ export async function runTestSuite(params: {
     }
 
     const batch = testCases.slice(i, i + CONCURRENCY);
+    const batchStartTime = Date.now();
 
     const batchResults = await Promise.all(
       batch.map(async (tc) => {
@@ -426,15 +620,33 @@ export async function runTestSuite(params: {
           previousStatus: tc.previousStatus || undefined,
         };
 
-        const { response, latencyMs, tokens, rawResponse } = await callTestAI(
+        const { response, latencyMs, tokens, rawResponse, hadRateLimit } = await callTestAI(
           prompt.systemPrompt,
           context,
           model,
           maxTokens
         );
 
+        // V1 comparison (single status)
         const detectedStatus = response?.currentStatus || null;
         const isPassed = detectedStatus === tc.expectedStatus;
+
+        // V2 comparison (primary/sub/actions)
+        let primaryPassed: boolean | null = null;
+        let subPassed: boolean | null = null;
+        let actionsPassed: boolean | null = null;
+
+        if (response?.isV2 && tc.expectedPrimaryStatus) {
+          primaryPassed = response.primaryStatus === tc.expectedPrimaryStatus;
+          // Sub-status: if expected is null, any sub is ok. Otherwise must match.
+          subPassed = tc.expectedSubStatus === null
+            ? true
+            : response.subStatus === tc.expectedSubStatus;
+          // Actions: compare arrays (order-independent)
+          const expectedActions = tc.expectedActions || [];
+          const detectedActions = response.actionRequired || [];
+          actionsPassed = actionsMatch(expectedActions, detectedActions);
+        }
 
         return {
           tc,
@@ -444,31 +656,58 @@ export async function runTestSuite(params: {
           rawResponse,
           detectedStatus,
           isPassed,
+          primaryPassed,
+          subPassed,
+          actionsPassed,
+          hadRateLimit,
         };
       })
     );
 
+    // Calculate batch stats for adaptive concurrency
+    const batchDurationMs = Date.now() - batchStartTime;
+    const batchTokens = batchResults.reduce((sum, r) => sum + r.tokens, 0);
+    const batchHadRateLimit = batchResults.some(r => r.hadRateLimit);
+
+    // Update adaptive concurrency based on this batch
+    adaptiveConcurrency.recordBatch(batchTokens, batch.length, batchDurationMs, batchHadRateLimit);
+
     // Store results and accumulate stats
     for (const result of batchResults) {
-      const { tc, response, latencyMs, tokens, rawResponse, detectedStatus, isPassed } = result;
+      const { tc, response, latencyMs, tokens, rawResponse, detectedStatus, isPassed, primaryPassed, subPassed, actionsPassed } = result;
 
+      // V1 metrics
       if (isPassed) passed++;
       else failed++;
+
+      // V2 metrics
+      if (primaryPassed === true) primaryPassedCount++;
+      if (subPassed === true) subPassedCount++;
+      if (actionsPassed === true) actionsPassedCount++;
 
       totalLatency += latencyMs;
       totalTokens += tokens;
       processed++;
 
-      // Store result
+      // Store result with both v1 and v2 fields
       await prisma.testResult.create({
         data: {
           runId: run.id,
           caseId: tc.id,
+          // V1 fields
           passed: isPassed,
           expectedStatus: tc.expectedStatus,
           detectedStatus,
           confidence: response?.confidence,
           reasoning: response?.reasoning,
+          // V2 fields
+          detectedPrimaryStatus: response?.primaryStatus || null,
+          detectedSubStatus: response?.subStatus,
+          detectedActions: response?.actionRequired || [],
+          primaryPassed,
+          subPassed,
+          actionsPassed,
+          // Debug
           rawResponse,
           latencyMs,
           tokens,
@@ -480,6 +719,12 @@ export async function runTestSuite(params: {
     const currentAccuracy = processed > 0 ? passed / processed : 0;
     const currentAvgLatency = processed > 0 ? totalLatency / processed : 0;
 
+    // V2 accuracies (only count cases that have v2 expectations)
+    const v2CasesProcessed = isV2Run ? processed : 0;
+    const currentPrimaryAccuracy = v2CasesProcessed > 0 ? primaryPassedCount / v2CasesProcessed : null;
+    const currentSubAccuracy = v2CasesProcessed > 0 ? subPassedCount / v2CasesProcessed : null;
+    const currentActionsAccuracy = v2CasesProcessed > 0 ? actionsPassedCount / v2CasesProcessed : null;
+
     await prisma.testRun.update({
       where: { id: run.id },
       data: {
@@ -487,21 +732,42 @@ export async function runTestSuite(params: {
         passed,
         failed,
         accuracy: currentAccuracy,
+        // V2 metrics
+        primaryPassed: isV2Run ? primaryPassedCount : null,
+        primaryAccuracy: currentPrimaryAccuracy,
+        subPassed: isV2Run ? subPassedCount : null,
+        subAccuracy: currentSubAccuracy,
+        actionsPassed: isV2Run ? actionsPassedCount : null,
+        actionsAccuracy: currentActionsAccuracy,
+        // Performance
         avgLatencyMs: currentAvgLatency,
         totalTokens,
         estimatedCost: calculateCost(totalTokens, model),
       },
     });
 
-    console.log(`[test-runner] Progress: ${processed}/${testCases.length} (${passed} passed, ${failed} failed)`);
+    if (isV2Run) {
+      console.log(`[test-runner] Progress: ${processed}/${testCases.length} (Primary: ${primaryPassedCount}, Sub: ${subPassedCount}, Actions: ${actionsPassedCount})`);
+    } else {
+      console.log(`[test-runner] Progress: ${processed}/${testCases.length} (${passed} passed, ${failed} failed)`);
+    }
+
+    // Move to next batch
+    i += CONCURRENCY;
   }
 
-  // Calculate stats
+  // Calculate final stats
   const accuracy = testCases.length > 0 ? passed / testCases.length : 0;
   const avgLatencyMs = testCases.length > 0 ? totalLatency / testCases.length : 0;
   const estimatedCost = calculateCost(totalTokens, model);
 
-  // Update run with results
+  // V2 final accuracies
+  const v2Cases = isV2Run ? testCases.length : 0;
+  const primaryAccuracy = v2Cases > 0 ? primaryPassedCount / v2Cases : null;
+  const subAccuracy = v2Cases > 0 ? subPassedCount / v2Cases : null;
+  const actionsAccuracy = v2Cases > 0 ? actionsPassedCount / v2Cases : null;
+
+  // Update run with final results
   await prisma.testRun.update({
     where: { id: run.id },
     data: {
@@ -511,13 +777,28 @@ export async function runTestSuite(params: {
       passed,
       failed,
       accuracy,
+      // V2 metrics
+      primaryPassed: isV2Run ? primaryPassedCount : null,
+      primaryAccuracy,
+      subPassed: isV2Run ? subPassedCount : null,
+      subAccuracy,
+      actionsPassed: isV2Run ? actionsPassedCount : null,
+      actionsAccuracy,
+      // Performance
       avgLatencyMs,
       totalTokens,
       estimatedCost,
     },
   });
 
-  console.log(`[test-runner] Run ${run.id} complete: ${passed}/${testCases.length} passed (${(accuracy * 100).toFixed(1)}%)`);
+  if (isV2Run) {
+    console.log(`[test-runner] Run ${run.id} complete:`);
+    console.log(`  Primary: ${primaryPassedCount}/${testCases.length} (${((primaryAccuracy || 0) * 100).toFixed(1)}%)`);
+    console.log(`  Sub: ${subPassedCount}/${testCases.length} (${((subAccuracy || 0) * 100).toFixed(1)}%)`);
+    console.log(`  Actions: ${actionsPassedCount}/${testCases.length} (${((actionsAccuracy || 0) * 100).toFixed(1)}%)`);
+  } else {
+    console.log(`[test-runner] Run ${run.id} complete: ${passed}/${testCases.length} passed (${(accuracy * 100).toFixed(1)}%)`);
+  }
 
   return run.id;
 }
@@ -965,15 +1246,17 @@ export async function resumeTestRun(runId: string): Promise<string> {
   const maxTokens = run.prompt?.maxTokens || 1500;
   const systemPrompt = run.promptSnapshot;
 
-  // Calculate dynamic concurrency based on model rate limits
+  // Create adaptive concurrency controller
   const estimatedTokensPerRequest = estimateRequestTokens(systemPrompt, " ".repeat(500), maxTokens);
-  const CONCURRENCY = calculateConcurrency(model, estimatedTokensPerRequest, remainingCases.length);
-  const limits = getModelRateLimits(model);
-  console.log(`[test-runner] Resume - Model: ${model}, Est. tokens/req: ${estimatedTokensPerRequest}, Concurrency: ${CONCURRENCY} (TPM: ${limits.tpm}, RPM: ${limits.rpm})`);
+  const adaptiveConcurrency = new AdaptiveConcurrency(model, estimatedTokensPerRequest);
+  console.log(`[test-runner] Resume - Model: ${model}, Est. tokens/req: ${estimatedTokensPerRequest}`);
 
   const totalCases = processed + remainingCases.length;
 
-  for (let i = 0; i < remainingCases.length; i += CONCURRENCY) {
+  let i = 0;
+  while (i < remainingCases.length) {
+    const CONCURRENCY = adaptiveConcurrency.getConcurrency();
+
     // Check if run has been paused or cancelled
     const currentRun = await prisma.testRun.findUnique({
       where: { id: runId },
@@ -991,6 +1274,7 @@ export async function resumeTestRun(runId: string): Promise<string> {
     }
 
     const batch = remainingCases.slice(i, i + CONCURRENCY);
+    const batchStartTime = Date.now();
 
     const batchResults = await Promise.all(
       batch.map(async (tc) => {
@@ -1002,7 +1286,7 @@ export async function resumeTestRun(runId: string): Promise<string> {
           previousStatus: tc.previousStatus || undefined,
         };
 
-        const { response, latencyMs, tokens, rawResponse } = await callTestAI(
+        const { response, latencyMs, tokens, rawResponse, hadRateLimit } = await callTestAI(
           systemPrompt,
           context,
           model,
@@ -1012,9 +1296,17 @@ export async function resumeTestRun(runId: string): Promise<string> {
         const detectedStatus = response?.currentStatus || null;
         const isPassed = detectedStatus === tc.expectedStatus;
 
-        return { tc, response, latencyMs, tokens, rawResponse, detectedStatus, isPassed };
+        return { tc, response, latencyMs, tokens, rawResponse, detectedStatus, isPassed, hadRateLimit };
       })
     );
+
+    // Calculate batch stats for adaptive concurrency
+    const batchDurationMs = Date.now() - batchStartTime;
+    const batchTokens = batchResults.reduce((sum, r) => sum + r.tokens, 0);
+    const batchHadRateLimit = batchResults.some(r => r.hadRateLimit);
+
+    // Update adaptive concurrency based on this batch
+    adaptiveConcurrency.recordBatch(batchTokens, batch.length, batchDurationMs, batchHadRateLimit);
 
     // Store results
     for (const result of batchResults) {
@@ -1061,6 +1353,9 @@ export async function resumeTestRun(runId: string): Promise<string> {
     });
 
     console.log(`[test-runner] Progress: ${processed}/${totalCases} (${passed} passed, ${failed} failed)`);
+
+    // Move to next batch
+    i += CONCURRENCY;
   }
 
   // Mark completed
