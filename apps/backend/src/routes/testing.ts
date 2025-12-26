@@ -256,6 +256,52 @@ testing.get("/prompts/default", async (c) => {
   });
 });
 
+// GET /api/testing/prompts/:id/debug - Compare saved prompt with fresh default
+testing.get("/prompts/:id/debug", async (c) => {
+  const { id } = c.req.param();
+
+  const prompt = await prisma.testPrompt.findUnique({
+    where: { id },
+    select: { systemPrompt: true, version: true },
+  });
+
+  if (!prompt) {
+    return c.json({ error: "Prompt not found" }, 404);
+  }
+
+  const freshDefault = await buildDefaultSystemPromptForTests();
+  const saved = prompt.systemPrompt;
+
+  // Find differences
+  const diffs: { index: number; saved: string; savedCode: number; fresh: string; freshCode: number }[] = [];
+  const maxLen = Math.max(saved.length, freshDefault.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    const savedChar = saved[i] || "";
+    const freshChar = freshDefault[i] || "";
+    if (savedChar !== freshChar) {
+      diffs.push({
+        index: i,
+        saved: savedChar,
+        savedCode: savedChar.charCodeAt(0) || 0,
+        fresh: freshChar,
+        freshCode: freshChar.charCodeAt(0) || 0,
+      });
+      if (diffs.length >= 20) break; // Limit output
+    }
+  }
+
+  return c.json({
+    version: prompt.version,
+    savedLength: saved.length,
+    freshLength: freshDefault.length,
+    lengthDiff: saved.length - freshDefault.length,
+    firstDiffs: diffs,
+    savedFirst100Codes: [...saved.slice(0, 100)].map(c => c.charCodeAt(0)),
+    freshFirst100Codes: [...freshDefault.slice(0, 100)].map(c => c.charCodeAt(0)),
+  });
+});
+
 // GET /api/testing/prompts/:id - Get single prompt
 testing.get("/prompts/:id", async (c) => {
   const { id } = c.req.param();
