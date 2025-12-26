@@ -60,7 +60,6 @@ export async function detectStatusFromSignals(
   direction: "INBOUND" | "OUTBOUND"
 ): Promise<SignalMatch | null> {
   const statuses = await getStatuses();
-  
   // Collect ALL matches, then pick the best one
   const allMatches: (SignalMatch & { order: number })[] = [];
   
