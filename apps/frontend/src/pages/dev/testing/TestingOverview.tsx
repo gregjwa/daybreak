@@ -11,7 +11,7 @@ import { Button } from "@/ui/button";
 import { Badge } from "@/ui/badge";
 import { 
   Users, 
-  EnvelopeSimple, 
+  Mail, 
   Terminal, 
   Play, 
   ArrowRight,
@@ -64,7 +64,7 @@ export default function TestingOverview() {
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center gap-2 text-muted-foreground">
-              <EnvelopeSimple className="h-4 w-4" />
+              <Mail className="h-4 w-4" />
               <span className="text-sm">Test Emails</span>
             </div>
           </CardHeader>
@@ -204,7 +204,7 @@ export default function TestingOverview() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <EnvelopeSimple className="h-5 w-5" />
+              <Mail className="h-5 w-5" />
               Email Sets
             </CardTitle>
             <CardDescription>

@@ -6,7 +6,7 @@
 
 import { useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useEmailSet, useTestCase, TestCase } from "@/api/useTesting";
+import { useEmailSet, useTestCase } from "@/api/useTesting";
 import { Button } from "@/ui/button";
 import { Card, CardContent } from "@/ui/card";
 import { Badge } from "@/ui/badge";

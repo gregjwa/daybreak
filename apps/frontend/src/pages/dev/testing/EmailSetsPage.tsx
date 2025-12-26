@@ -22,7 +22,7 @@ import {
 } from "@/ui/dialog";
 import { Label } from "@/ui/label";
 import { Textarea } from "@/ui/textarea";
-import { Loader2, Plus, ArrowRight, EnvelopeSimple, Play } from "lucide-react";
+import { Loader2, Plus, ArrowRight, Mail, Play } from "lucide-react";
 
 export default function EmailSetsPage() {
   const { data: emailSets, isLoading, refetch } = useEmailSets();
@@ -122,7 +122,7 @@ export default function EmailSetsPage() {
       ) : emailSets?.length === 0 ? (
         <Card className="py-12">
           <CardContent className="text-center">
-            <EnvelopeSimple className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+            <Mail className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
             <h3 className="text-lg font-semibold mb-2">No Email Sets</h3>
             <p className="text-muted-foreground mb-4">
               Create your first email set to start testing

@@ -5,10 +5,10 @@
  */
 
 import { useState } from "react";
-import { usePersonas, useGeneratePersonas, usePersona, TestPersona } from "@/api/useTesting";
+import { usePersonas, useGeneratePersonas, usePersona } from "@/api/useTesting";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
+import { Card, CardContent } from "@/ui/card";
 import { Badge } from "@/ui/badge";
 import {
   Dialog,

@@ -10,7 +10,7 @@ import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import { Textarea } from "@/ui/textarea";
 import { Label } from "@/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
+import { Card } from "@/ui/card";
 import { Badge } from "@/ui/badge";
 import {
   Dialog,
@@ -407,7 +407,7 @@ function ViewPromptDialog({
               <div>
                 <Label className="text-sm text-muted-foreground">Recent Runs</Label>
                 <div className="mt-2 space-y-2">
-                  {prompt.runs.map(run => (
+                  {prompt.runs.map((run: { id: string; accuracy: number; emailSet?: { name: string }; createdAt: string }) => (
                     <div 
                       key={run.id}
                       className="flex items-center justify-between p-2 rounded-md bg-muted"
