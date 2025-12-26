@@ -38,16 +38,17 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/ui/collapsible";
-import { 
-  Loader2, 
-  ArrowLeft, 
-  CheckCircle, 
-  XCircle, 
+import {
+  Loader2,
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
   ChevronDown,
   ChevronUp,
   ArrowDown,
   ArrowUp,
-  Eye
+  Eye,
+  Download
 } from "lucide-react";
 
 export default function RunDetail() {
@@ -124,10 +125,23 @@ export default function RunDetail() {
             {run.emailSet?.name} • {new Date(run.createdAt).toLocaleString()}
           </p>
         </div>
-        <Button variant="outline" onClick={() => setShowPrompt(true)}>
-          <Eye className="h-4 w-4 mr-2" />
-          View Prompt
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              window.open(`/api/testing/runs/${id}/export`, "_blank");
+            }}
+            disabled={run.status === "RUNNING"}
+            title={run.status === "RUNNING" ? "Wait for run to complete" : "Export for Claude Code review"}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Export
+          </Button>
+          <Button variant="outline" onClick={() => setShowPrompt(true)}>
+            <Eye className="h-4 w-4 mr-2" />
+            View Prompt
+          </Button>
+        </div>
       </div>
 
       {/* Live Progress Bar (when running) */}

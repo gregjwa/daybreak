@@ -314,7 +314,7 @@ export async function generateTestEmails(
             subject: email.subject,
             body: email.body,
             direction: scenario.direction,
-            threadContext: scenario.threadContext || null,
+            threadContext: scenario.threadContext || undefined,
             hasThreadContext: !!scenario.threadContext,
             expectedStatus: scenario.status,
             previousStatus: scenario.previousStatus || null,
@@ -463,7 +463,9 @@ IMPORTANT: Write like a real vendor/planner would, not like a formal business le
     throw new Error(`OpenAI API error: ${res.status}`);
   }
 
-  const data = await res.json();
+  const data = await res.json() as {
+    choices?: { message?: { content?: string } }[];
+  };
   const content = data.choices?.[0]?.message?.content;
   
   if (!content) throw new Error("Empty AI response");

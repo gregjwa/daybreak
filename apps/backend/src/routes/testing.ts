@@ -21,6 +21,7 @@ import {
   compareRuns,
   initializeDefaultPrompt,
   buildDefaultSystemPromptForTests,
+  exportRunForReview,
 } from "../lib/test-runner";
 
 const testing = new Hono();
@@ -463,6 +464,25 @@ testing.get("/compare", async (c) => {
 
   const comparison = await compareRuns(runId1, runId2);
   return c.json(comparison);
+});
+
+// GET /api/testing/runs/:id/export - Export run results as Markdown for Claude Code review
+testing.get("/runs/:id/export", async (c) => {
+  const { id } = c.req.param();
+
+  try {
+    const markdown = await exportRunForReview(id);
+
+    // Return as plain text markdown
+    return new Response(markdown, {
+      headers: {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Content-Disposition": `attachment; filename="test-run-${id}-review.md"`,
+      },
+    });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Export failed" }, 404);
+  }
 });
 
 export default testing;

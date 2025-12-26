@@ -525,8 +525,150 @@ export async function getPromptsWithStats() {
 }
 
 /**
- * Compare two test runs
+ * Export test results as Markdown for Claude Code review
+ * Includes: all failures, 10% random successes, 10 lowest confidence successes
  */
+export async function exportRunForReview(runId: string): Promise<string> {
+  const run = await prisma.testRun.findUnique({
+    where: { id: runId },
+    include: {
+      prompt: true,
+      emailSet: true,
+      results: {
+        include: {
+          case: {
+            include: { persona: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!run) {
+    throw new Error(`Run ${runId} not found`);
+  }
+
+  const failures = run.results.filter(r => !r.passed);
+  const successes = run.results.filter(r => r.passed);
+
+  // Get 10% random sample of successes
+  const sampleSize = Math.ceil(successes.length * 0.1);
+  const shuffled = [...successes].sort(() => Math.random() - 0.5);
+  const randomSample = shuffled.slice(0, sampleSize);
+
+  // Get 10 lowest confidence successes (that aren't already in random sample)
+  const randomSampleIds = new Set(randomSample.map(r => r.id));
+  const lowConfidenceSuccesses = successes
+    .filter(r => !randomSampleIds.has(r.id))
+    .sort((a, b) => (a.confidence ?? 1) - (b.confidence ?? 1))
+    .slice(0, 10);
+
+  // Build markdown
+  const lines: string[] = [];
+
+  lines.push(`# Test Run Review Export`);
+  lines.push(``);
+  lines.push(`**Run ID:** ${run.id}`);
+  lines.push(`**Prompt Version:** ${run.promptVersion}`);
+  lines.push(`**Model:** ${run.model}`);
+  lines.push(`**Email Set:** ${run.emailSet?.name || "Unknown"}`);
+  lines.push(`**Date:** ${run.createdAt.toISOString()}`);
+  lines.push(``);
+  lines.push(`## Summary`);
+  lines.push(`- **Total Cases:** ${run.totalCases}`);
+  lines.push(`- **Passed:** ${run.passed} (${((run.passed / run.totalCases) * 100).toFixed(1)}%)`);
+  lines.push(`- **Failed:** ${run.failed} (${((run.failed / run.totalCases) * 100).toFixed(1)}%)`);
+  lines.push(``);
+
+  // Format a single result
+  const formatResult = (r: typeof run.results[0], index: number, section: string): string => {
+    const tc = r.case;
+    const threadContext = tc.threadContext as { direction: string; subject: string; body: string }[] | null;
+
+    const resultLines: string[] = [];
+    resultLines.push(`### ${section} #${index + 1}`);
+    resultLines.push(``);
+    resultLines.push(`| Field | Value |`);
+    resultLines.push(`|-------|-------|`);
+    resultLines.push(`| **Scenario Type** | ${tc.scenario} |`);
+    resultLines.push(`| **Direction** | ${tc.direction} |`);
+    resultLines.push(`| **Previous Status** | ${tc.previousStatus || "none"} |`);
+    resultLines.push(`| **Expected Status** | ${r.expectedStatus} |`);
+    resultLines.push(`| **Detected Status** | ${r.detectedStatus || "null"} |`);
+    resultLines.push(`| **Confidence** | ${r.confidence?.toFixed(2) ?? "N/A"} |`);
+    resultLines.push(`| **Passed** | ${r.passed ? "YES" : "NO"} |`);
+    if (tc.persona) {
+      resultLines.push(`| **Persona** | ${tc.persona.name} (${tc.persona.communicationStyle}) |`);
+    }
+    resultLines.push(``);
+
+    if (threadContext && threadContext.length > 0) {
+      resultLines.push(`**Thread Context (previous messages):**`);
+      threadContext.forEach((msg, i) => {
+        resultLines.push(`\n> **Previous ${i + 1}** [${msg.direction}]`);
+        resultLines.push(`> Subject: ${msg.subject}`);
+        resultLines.push(`> ${msg.body.replace(/\n/g, "\n> ")}`);
+      });
+      resultLines.push(``);
+    }
+
+    resultLines.push(`**Email Subject:** ${tc.subject}`);
+    resultLines.push(``);
+    resultLines.push(`**Email Body:**`);
+    resultLines.push("```");
+    resultLines.push(tc.body);
+    resultLines.push("```");
+    resultLines.push(``);
+    resultLines.push(`**AI Reasoning:**`);
+    resultLines.push("```");
+    resultLines.push(r.reasoning || "No reasoning provided");
+    resultLines.push("```");
+    resultLines.push(``);
+    resultLines.push(`---`);
+    resultLines.push(``);
+
+    return resultLines.join("\n");
+  };
+
+  // Section 1: All Failures
+  lines.push(`## FAILURES (${failures.length} total)`);
+  lines.push(``);
+  if (failures.length === 0) {
+    lines.push(`No failures in this run.`);
+    lines.push(``);
+  } else {
+    failures.forEach((r, i) => {
+      lines.push(formatResult(r, i, "Failure"));
+    });
+  }
+
+  // Section 2: Low Confidence Successes
+  lines.push(`## LOW CONFIDENCE SUCCESSES (${lowConfidenceSuccesses.length} lowest)`);
+  lines.push(``);
+  if (lowConfidenceSuccesses.length === 0) {
+    lines.push(`No low confidence successes to show.`);
+    lines.push(``);
+  } else {
+    lowConfidenceSuccesses.forEach((r, i) => {
+      lines.push(formatResult(r, i, "Low Confidence"));
+    });
+  }
+
+  // Section 3: Random Sample of Successes
+  lines.push(`## RANDOM SUCCESS SAMPLE (${randomSample.length} of ${successes.length}, ~10%)`);
+  lines.push(``);
+  if (randomSample.length === 0) {
+    lines.push(`No successes to sample.`);
+    lines.push(``);
+  } else {
+    randomSample.forEach((r, i) => {
+      lines.push(formatResult(r, i, "Success Sample"));
+    });
+  }
+
+  return lines.join("\n");
+}
+
 export async function compareRuns(runId1: string, runId2: string) {
   const [run1, run2] = await Promise.all([
     getRunResults(runId1),
