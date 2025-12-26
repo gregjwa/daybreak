@@ -262,12 +262,16 @@ testing.get("/prompts/:id/debug", async (c) => {
 
   const prompt = await prisma.testPrompt.findUnique({
     where: { id },
-    select: { systemPrompt: true, version: true },
   });
 
   if (!prompt) {
     return c.json({ error: "Prompt not found" }, 404);
   }
+
+  // Also get v1-default for comparison
+  const defaultPrompt = await prisma.testPrompt.findUnique({
+    where: { version: "v1-default" },
+  });
 
   const freshDefault = await buildDefaultSystemPromptForTests();
   const saved = prompt.systemPrompt;
@@ -291,14 +295,34 @@ testing.get("/prompts/:id/debug", async (c) => {
     }
   }
 
+  // Also check last 100 chars
+  const savedLast100 = saved.slice(-100);
+  const freshLast100 = freshDefault.slice(-100);
+  const defaultLast100 = defaultPrompt?.systemPrompt.slice(-100) || "";
+
   return c.json({
-    version: prompt.version,
-    savedLength: saved.length,
-    freshLength: freshDefault.length,
-    lengthDiff: saved.length - freshDefault.length,
+    thisPrompt: {
+      version: prompt.version,
+      model: prompt.model,
+      maxTokens: prompt.maxTokens,
+      isActive: prompt.isActive,
+      promptLength: saved.length,
+    },
+    defaultPrompt: defaultPrompt ? {
+      version: defaultPrompt.version,
+      model: defaultPrompt.model,
+      maxTokens: defaultPrompt.maxTokens,
+      isActive: defaultPrompt.isActive,
+      promptLength: defaultPrompt.systemPrompt.length,
+    } : null,
+    freshDefaultLength: freshDefault.length,
+    contentIdenticalToDefault: saved === (defaultPrompt?.systemPrompt || ""),
+    contentIdenticalToFresh: saved === freshDefault,
     firstDiffs: diffs,
-    savedFirst100Codes: [...saved.slice(0, 100)].map(c => c.charCodeAt(0)),
-    freshFirst100Codes: [...freshDefault.slice(0, 100)].map(c => c.charCodeAt(0)),
+    savedLast100: savedLast100,
+    freshLast100: freshLast100,
+    defaultLast100: defaultLast100,
+    last100Match: savedLast100 === freshLast100,
   });
 });
 
