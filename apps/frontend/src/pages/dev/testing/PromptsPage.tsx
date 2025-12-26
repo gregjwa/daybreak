@@ -28,7 +28,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/ui/table";
-import { Loader2, Plus, Pencil, Copy, RotateCcw, Trash2 } from "lucide-react";
+import { Loader2, Plus, Pencil, Copy, RotateCcw, Trash2, Bug } from "lucide-react";
+import { getApiBaseUrl } from "@/lib/apiBase";
 
 const MODELS = [
   { value: "gpt-5-mini", label: "GPT-5 Mini (Recommended)" },
@@ -48,6 +49,20 @@ export default function PromptsPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [viewPromptId, setViewPromptId] = useState<string | null>(null);
   const [deletingPrompt, setDeletingPrompt] = useState<TestPrompt | null>(null);
+  const [debugData, setDebugData] = useState<Record<string, unknown> | null>(null);
+  const [debugLoading, setDebugLoading] = useState(false);
+
+  const handleDebug = async (promptId: string) => {
+    setDebugLoading(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/testing/prompts/${promptId}/debug`);
+      const data = await res.json();
+      setDebugData(data);
+    } catch (err) {
+      setDebugData({ error: String(err) });
+    }
+    setDebugLoading(false);
+  };
 
   const handleDelete = async () => {
     if (!deletingPrompt) return;
@@ -137,6 +152,15 @@ export default function PromptsPage() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        onClick={() => handleDebug(prompt.id)}
+                        disabled={debugLoading}
+                        title="Debug: compare with default"
+                      >
+                        <Bug className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => setDeletingPrompt(prompt)}
                         className="text-destructive hover:text-destructive"
                       >
@@ -205,6 +229,21 @@ export default function PromptsPage() {
               Delete
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Debug Dialog */}
+      <Dialog open={!!debugData} onOpenChange={() => setDebugData(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Prompt Debug Info</DialogTitle>
+            <DialogDescription>
+              Comparing saved prompt with freshly generated default
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="p-4 bg-muted rounded-md text-xs font-mono whitespace-pre-wrap overflow-x-auto">
+            {JSON.stringify(debugData, null, 2)}
+          </pre>
         </DialogContent>
       </Dialog>
     </div>
