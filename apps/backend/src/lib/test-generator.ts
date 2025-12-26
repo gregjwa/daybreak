@@ -48,7 +48,7 @@ const PERSONA_TEMPLATES: PersonaTemplate[] = [
 
   // DJs (4)
   { name: "DJ Electra", companyName: "Electra Entertainment", contactName: "DJ Electra (Elena)", email: "electra@djelectra.com", category: "dj", communicationStyle: "casual", reliability: "reliable", pricePoint: "premium" },
-  { name: "Party Starter DJs", companyName: "Party Starter Entertainment", contactName: "Mike "DJ Mikey" Thompson", email: "mikey@partystarterdjs.com", category: "dj", communicationStyle: "casual", reliability: "flaky", pricePoint: "mid-range" },
+  { name: "Party Starter DJs", companyName: "Party Starter Entertainment", contactName: "Mike 'DJ Mikey' Thompson", email: "mikey@partystarterdjs.com", category: "dj", communicationStyle: "casual", reliability: "flaky", pricePoint: "mid-range" },
   { name: "Classic Tunes DJ", companyName: "Classic Tunes Entertainment", contactName: "William Harris", email: "will@classictunesdj.com", category: "dj", communicationStyle: "formal", reliability: "reliable", pricePoint: "mid-range" },
   { name: "Budget Beats", companyName: "Budget Beats DJ Services", contactName: "Tony Rodriguez", email: "tony@budgetbeats.co", category: "dj", communicationStyle: "terse", reliability: "aggressive", pricePoint: "budget" },
 
@@ -59,7 +59,7 @@ const PERSONA_TEMPLATES: PersonaTemplate[] = [
   { name: "Community Center Hall", companyName: "Oakville Community Center", contactName: "Patricia Moore", email: "rentals@oakvillecc.org", category: "venue", communicationStyle: "terse", reliability: "reliable", pricePoint: "budget" },
 
   // Live Music (3)
-  { name: "The Moonlight Band", companyName: "Moonlight Entertainment", contactName: "David "Moonlight" Jones", email: "david@moonlightband.com", category: "live-music", communicationStyle: "casual", reliability: "reliable", pricePoint: "premium" },
+  { name: "The Moonlight Band", companyName: "Moonlight Entertainment", contactName: "David 'Moonlight' Jones", email: "david@moonlightband.com", category: "live-music", communicationStyle: "casual", reliability: "reliable", pricePoint: "premium" },
   { name: "Jazz Quartet Plus", companyName: "Jazz Quartet Plus", contactName: "Marcus Williams", email: "marcus@jazzquartetplus.com", category: "live-music", communicationStyle: "formal", reliability: "reliable", pricePoint: "mid-range" },
   { name: "Solo Acoustic", companyName: "Sarah's Acoustic Sessions", contactName: "Sarah Mitchell", email: "sarah@soloacoustic.co", category: "live-music", communicationStyle: "casual", reliability: "flaky", pricePoint: "budget" },
 
