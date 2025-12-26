@@ -8,7 +8,7 @@
 import { prisma } from "../db";
 import { buildStatusDetectionSystemPrompt } from "./status-detection-prompt";
 
-async function buildDefaultSystemPromptForTests(): Promise<string> {
+export async function buildDefaultSystemPromptForTests(): Promise<string> {
   const statuses = await prisma.supplierStatus.findMany({
     where: { isSystem: true },
     orderBy: { order: "asc" },

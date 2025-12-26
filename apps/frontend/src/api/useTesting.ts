@@ -341,6 +341,44 @@ export function useUpdatePrompt() {
   });
 }
 
+export interface DefaultPromptInfo {
+  systemPrompt: string;
+  model: string;
+  maxTokens: number;
+}
+
+export function useDefaultPrompt() {
+  return useQuery({
+    queryKey: ["testing", "prompts", "default"],
+    queryFn: async (): Promise<DefaultPromptInfo> => {
+      const res = await fetch(`${API_URL}/testing/prompts/default`);
+      if (!res.ok) throw new Error("Failed to fetch default prompt");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+export function useDeletePrompt() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`${API_URL}/testing/prompts/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to delete prompt");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["testing", "prompts"] });
+      queryClient.invalidateQueries({ queryKey: ["testing", "runs"] });
+    },
+  });
+}
+
 // --- Runs ---
 
 export function useRuns() {

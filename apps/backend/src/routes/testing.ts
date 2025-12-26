@@ -20,6 +20,7 @@ import {
   getPromptsWithStats,
   compareRuns,
   initializeDefaultPrompt,
+  buildDefaultSystemPromptForTests,
 } from "../lib/test-runner";
 
 const testing = new Hono();
@@ -230,9 +231,25 @@ testing.get("/cases/:id", async (c) => {
 testing.get("/prompts", async (c) => {
   // Ensure default prompt exists
   await initializeDefaultPrompt();
-  
+
   const prompts = await getPromptsWithStats();
   return c.json(prompts);
+});
+
+// GET /api/testing/prompts/default - Get default prompt text from code
+testing.get("/prompts/default", async (c) => {
+  const defaultModel =
+    process.env.THREAD_ANALYSIS_MODEL ||
+    process.env.TEST_DEFAULT_MODEL ||
+    "gpt-5-mini";
+
+  const systemPrompt = await buildDefaultSystemPromptForTests();
+
+  return c.json({
+    systemPrompt,
+    model: defaultModel,
+    maxTokens: 1500,
+  });
 });
 
 // GET /api/testing/prompts/:id - Get single prompt
@@ -336,6 +353,40 @@ testing.patch(
     return c.json(prompt);
   }
 );
+
+// DELETE /api/testing/prompts/:id - Delete prompt
+testing.delete("/prompts/:id", async (c) => {
+  const { id } = c.req.param();
+
+  // Check if prompt exists
+  const prompt = await prisma.testPrompt.findUnique({
+    where: { id },
+    include: { _count: { select: { runs: true } } },
+  });
+
+  if (!prompt) {
+    return c.json({ error: "Prompt not found" }, 404);
+  }
+
+  // Delete associated runs and results first (cascade)
+  if (prompt._count.runs > 0) {
+    // Delete all results for runs using this prompt
+    await prisma.testResult.deleteMany({
+      where: { run: { promptId: id } },
+    });
+    // Delete runs
+    await prisma.testRun.deleteMany({
+      where: { promptId: id },
+    });
+  }
+
+  // Delete the prompt
+  await prisma.testPrompt.delete({
+    where: { id },
+  });
+
+  return c.json({ success: true });
+});
 
 // --- Runs ---
 

@@ -5,7 +5,7 @@
  */
 
 import { useState } from "react";
-import { usePrompts, usePrompt, useCreatePrompt, useUpdatePrompt, TestPrompt } from "@/api/useTesting";
+import { usePrompts, usePrompt, useCreatePrompt, useUpdatePrompt, useDefaultPrompt, useDeletePrompt, TestPrompt } from "@/api/useTesting";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import { Textarea } from "@/ui/textarea";
@@ -28,7 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/ui/table";
-import { Loader2, Plus, Pencil, Copy } from "lucide-react";
+import { Loader2, Plus, Pencil, Copy, RotateCcw, Trash2 } from "lucide-react";
 
 const MODELS = [
   { value: "gpt-5-mini", label: "GPT-5 Mini (Recommended)" },
@@ -43,9 +43,18 @@ const MODELS = [
 
 export default function PromptsPage() {
   const { data: prompts, isLoading, refetch } = usePrompts();
+  const deleteMutation = useDeletePrompt();
   const [editingPrompt, setEditingPrompt] = useState<TestPrompt | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [viewPromptId, setViewPromptId] = useState<string | null>(null);
+  const [deletingPrompt, setDeletingPrompt] = useState<TestPrompt | null>(null);
+
+  const handleDelete = async () => {
+    if (!deletingPrompt) return;
+    await deleteMutation.mutateAsync(deletingPrompt.id);
+    setDeletingPrompt(null);
+    refetch();
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -111,19 +120,27 @@ export default function PromptsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="sm"
                         onClick={() => setEditingPrompt(prompt)}
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="sm"
                         onClick={() => setViewPromptId(prompt.id)}
                       >
                         View
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDeletingPrompt(prompt)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>
@@ -162,6 +179,34 @@ export default function PromptsPage() {
         promptId={viewPromptId}
         onClose={() => setViewPromptId(null)}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deletingPrompt} onOpenChange={() => setDeletingPrompt(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Prompt</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{deletingPrompt?.name}" ({deletingPrompt?.version})?
+              This will also delete all associated test runs and results.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingPrompt(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -181,6 +226,7 @@ function PromptEditorDialog({
 }) {
   const createMutation = useCreatePrompt();
   const updateMutation = useUpdatePrompt();
+  const { data: defaultPrompt, isLoading: isLoadingDefault } = useDefaultPrompt();
 
   const [version, setVersion] = useState("");
   const [name, setName] = useState("");
@@ -244,6 +290,14 @@ function PromptEditorDialog({
       const nextVersion = Math.max(0, ...versionNumbers) + 1;
       setVersion(`v${nextVersion}`);
       setName(`${prompt.name} (Copy)`);
+    }
+  };
+
+  const handleLoadDefault = () => {
+    if (defaultPrompt) {
+      setSystemPrompt(defaultPrompt.systemPrompt);
+      setModel(defaultPrompt.model);
+      setMaxTokens(defaultPrompt.maxTokens);
     }
   };
 
@@ -323,7 +377,22 @@ function PromptEditorDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="systemPrompt">System Prompt</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="systemPrompt">System Prompt</Label>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLoadDefault}
+                disabled={isLoadingDefault || !defaultPrompt}
+              >
+                {isLoadingDefault ? (
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-3 w-3 mr-1" />
+                )}
+                Load Default from Code
+              </Button>
+            </div>
             <Textarea
               id="systemPrompt"
               placeholder="You are analyzing an email thread..."
