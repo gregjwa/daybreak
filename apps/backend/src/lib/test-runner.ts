@@ -189,7 +189,8 @@ async function callTestAI(
   systemPrompt: string,
   testCase: TestContext,
   model: string,
-  maxTokens: number
+  maxTokens: number,
+  retries = 3
 ): Promise<{ response: AITestResponse | null; latencyMs: number; tokens: number; rawResponse: string }> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -199,59 +200,77 @@ async function callTestAI(
   const userMessage = buildTestUserMessage(testCase);
   const startTime = Date.now();
 
-  try {
-    // Use structured outputs for guaranteed valid JSON
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-        max_completion_tokens: maxTokens,
-        response_format: {
-          type: "json_schema",
-          json_schema: AI_RESPONSE_JSON_SCHEMA,
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // Use structured outputs for guaranteed valid JSON
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
         },
-      }),
-    });
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          max_completion_tokens: maxTokens,
+          response_format: {
+            type: "json_schema",
+            json_schema: AI_RESPONSE_JSON_SCHEMA,
+          },
+        }),
+      });
 
-    const latencyMs = Date.now() - startTime;
+      const latencyMs = Date.now() - startTime;
 
-    if (!res.ok) {
-      const err = await res.text();
-      return { response: null, latencyMs, tokens: 0, rawResponse: `API Error: ${err}` };
+      if (!res.ok) {
+        const err = await res.text();
+        // Retry on quota/rate limit errors
+        if ((res.status === 429 || err.includes("quota") || err.includes("rate")) && attempt < retries) {
+          const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+          console.log(`[test-runner] Quota/rate error, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        return { response: null, latencyMs, tokens: 0, rawResponse: `API Error: ${err}` };
+      }
+
+      const data = await res.json() as {
+        choices?: { message?: { content?: string } }[];
+        usage?: { total_tokens?: number };
+      };
+
+      const content = data.choices?.[0]?.message?.content;
+      const tokens = data.usage?.total_tokens || 0;
+
+      if (!content) {
+        return { response: null, latencyMs, tokens, rawResponse: "Empty response from API" };
+      }
+
+      // With structured outputs, parsing should be guaranteed valid
+      const parsed = AITestResponseSchema.parse(JSON.parse(content));
+      return { response: parsed, latencyMs, tokens, rawResponse: content };
+    } catch (error) {
+      if (attempt < retries) {
+        const delay = Math.pow(2, attempt) * 1000;
+        console.log(`[test-runner] Error, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      const latencyMs = Date.now() - startTime;
+      return {
+        response: null,
+        latencyMs,
+        tokens: 0,
+        rawResponse: `Error: ${error instanceof Error ? error.message : String(error)}`
+      };
     }
-
-    const data = await res.json() as {
-      choices?: { message?: { content?: string } }[];
-      usage?: { total_tokens?: number };
-    };
-
-    const content = data.choices?.[0]?.message?.content;
-    const tokens = data.usage?.total_tokens || 0;
-
-    if (!content) {
-      return { response: null, latencyMs, tokens, rawResponse: "Empty response from API" };
-    }
-
-    // With structured outputs, parsing should be guaranteed valid
-    const parsed = AITestResponseSchema.parse(JSON.parse(content));
-    return { response: parsed, latencyMs, tokens, rawResponse: content };
-  } catch (error) {
-    const latencyMs = Date.now() - startTime;
-    return { 
-      response: null, 
-      latencyMs, 
-      tokens: 0, 
-      rawResponse: `Error: ${error instanceof Error ? error.message : String(error)}` 
-    };
   }
+
+  // Should never reach here, but TypeScript needs it
+  return { response: null, latencyMs: Date.now() - startTime, tokens: 0, rawResponse: "Max retries exceeded" };
 }
 
 /**
@@ -305,7 +324,7 @@ export async function runTestSuite(params: {
 
   // Process in parallel batches for speed
   // Concurrency of 15 balances speed with API rate limits
-  const CONCURRENCY = 15;
+  const CONCURRENCY = 10;
 
   for (let i = 0; i < testCases.length; i += CONCURRENCY) {
     // Check if run has been paused or cancelled
@@ -610,6 +629,43 @@ export async function exportRunForReview(runId: string): Promise<string> {
   lines.push(`- **Passed:** ${run.passed} (${((run.passed / run.totalCases) * 100).toFixed(1)}%)`);
   lines.push(`- **Failed:** ${run.failed} (${((run.failed / run.totalCases) * 100).toFixed(1)}%)`);
   lines.push(`- **Null Responses:** ${nullResponses.length} (${apiErrors.length} API errors, ${intentionalNulls.length} AI returned null)`);
+  lines.push(``);
+
+  // Calculate breakdowns
+  const byScenario: Record<string, { passed: number; total: number }> = {};
+  const byStatus: Record<string, { passed: number; total: number }> = {};
+
+  for (const result of run.results) {
+    const scenario = result.case.scenario;
+    const status = result.expectedStatus;
+
+    if (!byScenario[scenario]) byScenario[scenario] = { passed: 0, total: 0 };
+    byScenario[scenario].total++;
+    if (result.passed) byScenario[scenario].passed++;
+
+    if (!byStatus[status]) byStatus[status] = { passed: 0, total: 0 };
+    byStatus[status].total++;
+    if (result.passed) byStatus[status].passed++;
+  }
+
+  lines.push(`## Accuracy by Scenario`);
+  lines.push(``);
+  lines.push(`| Scenario | Passed | Total | Accuracy |`);
+  lines.push(`|----------|--------|-------|----------|`);
+  for (const [scenario, stats] of Object.entries(byScenario).sort((a, b) => a[0].localeCompare(b[0]))) {
+    const acc = stats.total > 0 ? ((stats.passed / stats.total) * 100).toFixed(1) : "0.0";
+    lines.push(`| ${scenario} | ${stats.passed} | ${stats.total} | ${acc}% |`);
+  }
+  lines.push(``);
+
+  lines.push(`## Accuracy by Expected Status`);
+  lines.push(``);
+  lines.push(`| Status | Passed | Total | Accuracy |`);
+  lines.push(`|--------|--------|-------|----------|`);
+  for (const [status, stats] of Object.entries(byStatus).sort((a, b) => a[0].localeCompare(b[0]))) {
+    const acc = stats.total > 0 ? ((stats.passed / stats.total) * 100).toFixed(1) : "0.0";
+    lines.push(`| ${status} | ${stats.passed} | ${stats.total} | ${acc}% |`);
+  }
   lines.push(``);
 
   // Format a single result
