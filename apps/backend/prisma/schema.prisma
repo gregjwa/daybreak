@@ -666,6 +666,7 @@ model TestCase {
   
   // Ground truth
   expectedStatus  String
+  previousStatus  String?          // Status before this email arrived (for progression context)
   scenario        String           // "normal", "tricky", "followup", "edge"
   difficulty      Int              // 1-4
   

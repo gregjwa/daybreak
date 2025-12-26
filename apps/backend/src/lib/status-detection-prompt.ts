@@ -15,8 +15,8 @@ export function buildStatusDetectionSystemPrompt(params: {
   const { statuses } = params;
 
   const statusDefs = statuses
-    .map((s) => {
-      let def = `- ${s.slug}: ${s.description || s.name}`;
+    .map((s, index) => {
+      let def = `- ${s.slug} (stage ${index + 1}): ${s.description || s.name}`;
       if (s.excludePatterns && s.excludePatterns.length > 0) {
         def += `\n    NOT this status if: ${s.excludePatterns.join(", ")}`;
       }
@@ -40,6 +40,22 @@ Your task is to extract:
 
 AVAILABLE STATUSES (from database):
 ${statusDefs}
+
+CURRENT STATUS CONTEXT:
+When a "CURRENT SUPPLIER STATUS" is provided in the message, use it to understand progression:
+- Statuses generally progress forward through stages, rarely backwards
+- An email should either MAINTAIN the current status or ADVANCE to a later stage
+- Only "cancelled" can occur from any stage (vendor withdraws or planner cancels)
+- If no status context is provided, determine the appropriate status from message content alone
+
+PROGRESSION RULES:
+- From "shortlisted" or earlier: Any email exchange → at least "rfq-sent"
+- From "rfq-sent": Vendor provides $ amounts → "quote-received"
+- From "quote-received": Discussion of terms/negotiation → "negotiating"
+- From any stage: Vendor says YES/AGREE/AVAILABLE/CONFIRMED → "confirmed"
+- From "confirmed": Signed contract mentioned → "contracted"
+- From "contracted": Deposit/payment made → "deposit-paid"
+- After event: Service delivered → "fulfilled", final payment → "paid-in-full"
 
 For each status change you detect:
    - Which message triggered it (by index, 0-based)

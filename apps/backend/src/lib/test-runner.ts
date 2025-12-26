@@ -1,12 +1,38 @@
 /**
  * Test Runner
- * 
+ *
  * Executes status detection tests against AI prompts/models.
  * Stores results for comparison and analysis.
  */
 
 import { prisma } from "../db";
 import { buildStatusDetectionSystemPrompt } from "./status-detection-prompt";
+import { z } from "zod";
+
+// Zod schema for structured AI responses
+const AITestResponseSchema = z.object({
+  currentStatus: z.string().nullable(),
+  confidence: z.number().min(0).max(1),
+  reasoning: z.string(),
+});
+
+type AITestResponseType = z.infer<typeof AITestResponseSchema>;
+
+// JSON Schema for OpenAI structured outputs
+const AI_RESPONSE_JSON_SCHEMA = {
+  name: "status_detection",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      currentStatus: { type: ["string", "null"], description: "The detected status slug, or null if uncertain" },
+      confidence: { type: "number", minimum: 0, maximum: 1, description: "Confidence score between 0 and 1" },
+      reasoning: { type: "string", description: "Explanation of why this status was detected" },
+    },
+    required: ["currentStatus", "confidence", "reasoning"],
+    additionalProperties: false,
+  },
+};
 
 export async function buildDefaultSystemPromptForTests(): Promise<string> {
   const statuses = await prisma.supplierStatus.findMany({
@@ -35,6 +61,7 @@ interface TestContext {
   body: string;
   direction: "INBOUND" | "OUTBOUND";
   threadContext?: { direction: string; subject: string; body: string }[];
+  previousStatus?: string; // Current status before this email arrived
 }
 
 interface AITestResponse {
@@ -127,6 +154,12 @@ export async function getOrCreatePrompt(version: string, systemPrompt?: string):
 function buildTestUserMessage(testCase: TestContext): string {
   const lines: string[] = [];
 
+  // Add current status context if available
+  if (testCase.previousStatus) {
+    lines.push(`CURRENT SUPPLIER STATUS: ${testCase.previousStatus}`);
+    lines.push("(Analyze this email to determine if status should change)\n");
+  }
+
   // Add thread context if present
   if (testCase.threadContext && testCase.threadContext.length > 0) {
     lines.push("THREAD CONTEXT (previous messages):\n");
@@ -167,6 +200,7 @@ async function callTestAI(
   const startTime = Date.now();
 
   try {
+    // Use structured outputs for guaranteed valid JSON
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -180,6 +214,10 @@ async function callTestAI(
           { role: "user", content: userMessage },
         ],
         max_completion_tokens: maxTokens,
+        response_format: {
+          type: "json_schema",
+          json_schema: AI_RESPONSE_JSON_SCHEMA,
+        },
       }),
     });
 
@@ -195,23 +233,15 @@ async function callTestAI(
       usage?: { total_tokens?: number };
     };
 
-    const content = data.choices?.[0]?.message?.content || "{}";
+    const content = data.choices?.[0]?.message?.content;
     const tokens = data.usage?.total_tokens || 0;
 
-    // Parse JSON
-    let jsonStr = content;
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1];
+    if (!content) {
+      return { response: null, latencyMs, tokens, rawResponse: "Empty response from API" };
     }
 
-    // Try to find JSON object in response
-    const objMatch = jsonStr.match(/\{[\s\S]*\}/);
-    if (objMatch) {
-      jsonStr = objMatch[0];
-    }
-
-    const parsed = JSON.parse(jsonStr) as AITestResponse;
+    // With structured outputs, parsing should be guaranteed valid
+    const parsed = AITestResponseSchema.parse(JSON.parse(content));
     return { response: parsed, latencyMs, tokens, rawResponse: content };
   } catch (error) {
     const latencyMs = Date.now() - startTime;
@@ -271,73 +301,93 @@ export async function runTestSuite(params: {
   let failed = 0;
   let totalLatency = 0;
   let totalTokens = 0;
+  let processed = 0;
 
-  // Process each test case
-  for (let i = 0; i < testCases.length; i++) {
-    const tc = testCases[i];
+  // Process in parallel batches for speed
+  // Concurrency of 15 balances speed with API rate limits
+  const CONCURRENCY = 15;
 
-    const context: TestContext = {
-      subject: tc.subject,
-      body: tc.body,
-      direction: tc.direction as "INBOUND" | "OUTBOUND",
-      threadContext: tc.threadContext as { direction: string; subject: string; body: string }[] | undefined,
-    };
+  for (let i = 0; i < testCases.length; i += CONCURRENCY) {
+    const batch = testCases.slice(i, i + CONCURRENCY);
 
-    const { response, latencyMs, tokens, rawResponse } = await callTestAI(
-      prompt.systemPrompt,
-      context,
-      model,
-      maxTokens
+    const batchResults = await Promise.all(
+      batch.map(async (tc) => {
+        const context: TestContext = {
+          subject: tc.subject,
+          body: tc.body,
+          direction: tc.direction as "INBOUND" | "OUTBOUND",
+          threadContext: tc.threadContext as { direction: string; subject: string; body: string }[] | undefined,
+          previousStatus: tc.previousStatus || undefined,
+        };
+
+        const { response, latencyMs, tokens, rawResponse } = await callTestAI(
+          prompt.systemPrompt,
+          context,
+          model,
+          maxTokens
+        );
+
+        const detectedStatus = response?.currentStatus || null;
+        const isPassed = detectedStatus === tc.expectedStatus;
+
+        return {
+          tc,
+          response,
+          latencyMs,
+          tokens,
+          rawResponse,
+          detectedStatus,
+          isPassed,
+        };
+      })
     );
 
-    const detectedStatus = response?.currentStatus || null;
-    const isPassed = detectedStatus === tc.expectedStatus;
+    // Store results and accumulate stats
+    for (const result of batchResults) {
+      const { tc, response, latencyMs, tokens, rawResponse, detectedStatus, isPassed } = result;
 
-    if (isPassed) passed++;
-    else failed++;
+      if (isPassed) passed++;
+      else failed++;
 
-    totalLatency += latencyMs;
-    totalTokens += tokens;
+      totalLatency += latencyMs;
+      totalTokens += tokens;
+      processed++;
 
-    // Store result
-    await prisma.testResult.create({
+      // Store result
+      await prisma.testResult.create({
+        data: {
+          runId: run.id,
+          caseId: tc.id,
+          passed: isPassed,
+          expectedStatus: tc.expectedStatus,
+          detectedStatus,
+          confidence: response?.confidence,
+          reasoning: response?.reasoning,
+          rawResponse,
+          latencyMs,
+          tokens,
+        },
+      });
+    }
+
+    // Update run progress after each batch
+    const currentAccuracy = processed > 0 ? passed / processed : 0;
+    const currentAvgLatency = processed > 0 ? totalLatency / processed : 0;
+
+    await prisma.testRun.update({
+      where: { id: run.id },
       data: {
-        runId: run.id,
-        caseId: tc.id,
-        passed: isPassed,
-        expectedStatus: tc.expectedStatus,
-        detectedStatus,
-        confidence: response?.confidence,
-        reasoning: response?.reasoning,
-        rawResponse,
-        latencyMs,
-        tokens,
+        totalCases: testCases.length,
+        passed,
+        failed,
+        accuracy: currentAccuracy,
+        avgLatencyMs: currentAvgLatency,
+        totalTokens,
+        estimatedCost: calculateCost(totalTokens, model),
       },
     });
 
-    // Update run progress every 10 cases for real-time UI updates
-    if ((i + 1) % 10 === 0 || i === testCases.length - 1) {
-      const currentAccuracy = (i + 1) > 0 ? passed / (i + 1) : 0;
-      const currentAvgLatency = (i + 1) > 0 ? totalLatency / (i + 1) : 0;
-      
-      await prisma.testRun.update({
-        where: { id: run.id },
-        data: {
-          totalCases: testCases.length,
-          passed,
-          failed,
-          accuracy: currentAccuracy,
-          avgLatencyMs: currentAvgLatency,
-          totalTokens,
-          estimatedCost: calculateCost(totalTokens, model),
-        },
-      });
-      
-      console.log(`[test-runner] Progress: ${i + 1}/${testCases.length} (${passed} passed, ${failed} failed)`);
-    }
-
-    // Small delay to avoid rate limiting
-    await new Promise(r => setTimeout(r, 100));
+    console.log(`[test-runner] Progress: ${processed}/${testCases.length} (${passed} passed, ${failed} failed)`);
   }
 
   // Calculate stats
