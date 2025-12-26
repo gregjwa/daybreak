@@ -6,7 +6,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useRun, TestResult } from "@/api/useTesting";
+import { useRun, TestResult, usePauseRun, useResumeRun, useCancelRun } from "@/api/useTesting";
 import { getApiBaseUrl } from "@/lib/apiBase";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
@@ -49,13 +49,19 @@ import {
   ArrowDown,
   ArrowUp,
   Eye,
-  Download
+  Download,
+  Pause,
+  Play,
+  Square
 } from "lucide-react";
 
 export default function RunDetail() {
   const { id } = useParams<{ id: string }>();
   const { data, isLoading, refetch } = useRun(id);
-  
+  const pauseMutation = usePauseRun();
+  const resumeMutation = useResumeRun();
+  const cancelMutation = useCancelRun();
+
   const [filter, setFilter] = useState<"all" | "passed" | "failed">("all");
   const [selectedResult, setSelectedResult] = useState<TestResult | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
@@ -121,19 +127,90 @@ export default function RunDetail() {
                 Running
               </Badge>
             )}
+            {run.status === "PAUSED" && (
+              <Badge variant="outline" className="gap-1 border-yellow-500 text-yellow-600">
+                <Pause className="h-3 w-3" />
+                Paused
+              </Badge>
+            )}
+            {run.status === "CANCELLED" && (
+              <Badge variant="outline" className="gap-1 border-red-500 text-red-600">
+                <Square className="h-3 w-3" />
+                Cancelled
+              </Badge>
+            )}
           </div>
           <p className="text-muted-foreground">
             {run.emailSet?.name} • {new Date(run.createdAt).toLocaleString()}
           </p>
         </div>
         <div className="flex gap-2">
+          {/* Pause/Resume/Cancel buttons */}
+          {run.status === "RUNNING" && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => id && pauseMutation.mutate(id)}
+                disabled={pauseMutation.isPending}
+              >
+                {pauseMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Pause className="h-4 w-4 mr-2" />
+                )}
+                Pause
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => id && cancelMutation.mutate(id)}
+                disabled={cancelMutation.isPending}
+                className="text-destructive hover:text-destructive"
+              >
+                {cancelMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Square className="h-4 w-4 mr-2" />
+                )}
+                Cancel
+              </Button>
+            </>
+          )}
+          {run.status === "PAUSED" && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => id && resumeMutation.mutate(id)}
+                disabled={resumeMutation.isPending}
+              >
+                {resumeMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4 mr-2" />
+                )}
+                Resume
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => id && cancelMutation.mutate(id)}
+                disabled={cancelMutation.isPending}
+                className="text-destructive hover:text-destructive"
+              >
+                {cancelMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Square className="h-4 w-4 mr-2" />
+                )}
+                Cancel
+              </Button>
+            </>
+          )}
           <Button
             variant="outline"
             onClick={() => {
               window.open(`${getApiBaseUrl()}/testing/runs/${id}/export`, "_blank");
             }}
-            disabled={run.status === "RUNNING"}
-            title={run.status === "RUNNING" ? "Wait for run to complete" : "Export for Claude Code review"}
+            disabled={run.status === "RUNNING" || run.status === "PAUSED"}
+            title={run.status === "RUNNING" || run.status === "PAUSED" ? "Wait for run to complete" : "Export for Claude Code review"}
           >
             <Download className="h-4 w-4 mr-2" />
             Export

@@ -449,4 +449,55 @@ export function useCompareRuns(run1?: string, run2?: string) {
   });
 }
 
+export function usePauseRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (runId: string) => {
+      const res = await fetch(`${API_URL}/testing/runs/${runId}/pause`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("Failed to pause run");
+      return res.json() as Promise<{ success: boolean; status: string }>;
+    },
+    onSuccess: (_, runId) => {
+      queryClient.invalidateQueries({ queryKey: ["testing", "runs"] });
+      queryClient.invalidateQueries({ queryKey: ["testing", "run", runId] });
+    },
+  });
+}
+
+export function useResumeRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (runId: string) => {
+      const res = await fetch(`${API_URL}/testing/runs/${runId}/resume`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("Failed to resume run");
+      return res.json() as Promise<{ success: boolean; status: string }>;
+    },
+    onSuccess: (_, runId) => {
+      queryClient.invalidateQueries({ queryKey: ["testing", "runs"] });
+      queryClient.invalidateQueries({ queryKey: ["testing", "run", runId] });
+    },
+  });
+}
+
+export function useCancelRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (runId: string) => {
+      const res = await fetch(`${API_URL}/testing/runs/${runId}/cancel`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("Failed to cancel run");
+      return res.json() as Promise<{ success: boolean; status: string }>;
+    },
+    onSuccess: (_, runId) => {
+      queryClient.invalidateQueries({ queryKey: ["testing", "runs"] });
+      queryClient.invalidateQueries({ queryKey: ["testing", "run", runId] });
+    },
+  });
+}
+
 

@@ -308,6 +308,22 @@ export async function runTestSuite(params: {
   const CONCURRENCY = 15;
 
   for (let i = 0; i < testCases.length; i += CONCURRENCY) {
+    // Check if run has been paused or cancelled
+    const currentRun = await prisma.testRun.findUnique({
+      where: { id: run.id },
+      select: { status: true },
+    });
+
+    if (currentRun?.status === "PAUSED") {
+      console.log(`[test-runner] Run ${run.id} paused at ${processed}/${testCases.length}`);
+      return run.id; // Return early, can be resumed later
+    }
+
+    if (currentRun?.status === "CANCELLED") {
+      console.log(`[test-runner] Run ${run.id} cancelled at ${processed}/${testCases.length}`);
+      return run.id;
+    }
+
     const batch = testCases.slice(i, i + CONCURRENCY);
 
     const batchResults = await Promise.all(
@@ -667,6 +683,234 @@ export async function exportRunForReview(runId: string): Promise<string> {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Pause a running test
+ */
+export async function pauseTestRun(runId: string): Promise<void> {
+  const run = await prisma.testRun.findUnique({
+    where: { id: runId },
+    select: { status: true },
+  });
+
+  if (!run) {
+    throw new Error(`Run ${runId} not found`);
+  }
+
+  if (run.status !== "RUNNING") {
+    throw new Error(`Cannot pause run with status ${run.status}`);
+  }
+
+  await prisma.testRun.update({
+    where: { id: runId },
+    data: { status: "PAUSED" },
+  });
+
+  console.log(`[test-runner] Run ${runId} marked for pause`);
+}
+
+/**
+ * Cancel a running or paused test
+ */
+export async function cancelTestRun(runId: string): Promise<void> {
+  const run = await prisma.testRun.findUnique({
+    where: { id: runId },
+    select: { status: true },
+  });
+
+  if (!run) {
+    throw new Error(`Run ${runId} not found`);
+  }
+
+  if (run.status !== "RUNNING" && run.status !== "PAUSED") {
+    throw new Error(`Cannot cancel run with status ${run.status}`);
+  }
+
+  await prisma.testRun.update({
+    where: { id: runId },
+    data: { status: "CANCELLED" },
+  });
+
+  console.log(`[test-runner] Run ${runId} cancelled`);
+}
+
+/**
+ * Resume a paused test
+ */
+export async function resumeTestRun(runId: string): Promise<string> {
+  const run = await prisma.testRun.findUnique({
+    where: { id: runId },
+    include: { prompt: true },
+  });
+
+  if (!run) {
+    throw new Error(`Run ${runId} not found`);
+  }
+
+  if (run.status !== "PAUSED") {
+    throw new Error(`Cannot resume run with status ${run.status}`);
+  }
+
+  // Get already processed case IDs
+  const processedResults = await prisma.testResult.findMany({
+    where: { runId },
+    select: { caseId: true },
+  });
+  const processedCaseIds = new Set(processedResults.map(r => r.caseId));
+
+  // Get remaining test cases
+  const remainingCases = await prisma.testCase.findMany({
+    where: {
+      emailSetId: run.emailSetId,
+      id: { notIn: Array.from(processedCaseIds) },
+    },
+    include: { persona: true },
+  });
+
+  if (remainingCases.length === 0) {
+    // All cases already processed, mark as completed
+    await prisma.testRun.update({
+      where: { id: runId },
+      data: { status: "COMPLETED", completedAt: new Date() },
+    });
+    return runId;
+  }
+
+  // Mark as running again
+  await prisma.testRun.update({
+    where: { id: runId },
+    data: { status: "RUNNING" },
+  });
+
+  console.log(`[test-runner] Resuming run ${runId} with ${remainingCases.length} remaining cases`);
+
+  // Get current stats
+  let { passed, failed, totalTokens } = run;
+  passed = passed || 0;
+  failed = failed || 0;
+  totalTokens = totalTokens || 0;
+  let totalLatency = (run.avgLatencyMs || 0) * processedCaseIds.size;
+  let processed = processedCaseIds.size;
+
+  const model = run.model;
+  const maxTokens = run.prompt?.maxTokens || 1500;
+  const systemPrompt = run.promptSnapshot;
+
+  const CONCURRENCY = 15;
+  const totalCases = processed + remainingCases.length;
+
+  for (let i = 0; i < remainingCases.length; i += CONCURRENCY) {
+    // Check if run has been paused or cancelled
+    const currentRun = await prisma.testRun.findUnique({
+      where: { id: runId },
+      select: { status: true },
+    });
+
+    if (currentRun?.status === "PAUSED") {
+      console.log(`[test-runner] Run ${runId} paused at ${processed}/${totalCases}`);
+      return runId;
+    }
+
+    if (currentRun?.status === "CANCELLED") {
+      console.log(`[test-runner] Run ${runId} cancelled at ${processed}/${totalCases}`);
+      return runId;
+    }
+
+    const batch = remainingCases.slice(i, i + CONCURRENCY);
+
+    const batchResults = await Promise.all(
+      batch.map(async (tc) => {
+        const context: TestContext = {
+          subject: tc.subject,
+          body: tc.body,
+          direction: tc.direction as "INBOUND" | "OUTBOUND",
+          threadContext: tc.threadContext as { direction: string; subject: string; body: string }[] | undefined,
+          previousStatus: tc.previousStatus || undefined,
+        };
+
+        const { response, latencyMs, tokens, rawResponse } = await callTestAI(
+          systemPrompt,
+          context,
+          model,
+          maxTokens
+        );
+
+        const detectedStatus = response?.currentStatus || null;
+        const isPassed = detectedStatus === tc.expectedStatus;
+
+        return { tc, response, latencyMs, tokens, rawResponse, detectedStatus, isPassed };
+      })
+    );
+
+    // Store results
+    for (const result of batchResults) {
+      const { tc, response, latencyMs, tokens, rawResponse, detectedStatus, isPassed } = result;
+
+      if (isPassed) passed++;
+      else failed++;
+
+      totalLatency += latencyMs;
+      totalTokens += tokens;
+      processed++;
+
+      await prisma.testResult.create({
+        data: {
+          runId,
+          caseId: tc.id,
+          passed: isPassed,
+          expectedStatus: tc.expectedStatus,
+          detectedStatus,
+          confidence: response?.confidence,
+          reasoning: response?.reasoning,
+          rawResponse,
+          latencyMs,
+          tokens,
+        },
+      });
+    }
+
+    // Update progress
+    const currentAccuracy = processed > 0 ? passed / processed : 0;
+    const currentAvgLatency = processed > 0 ? totalLatency / processed : 0;
+
+    await prisma.testRun.update({
+      where: { id: runId },
+      data: {
+        totalCases,
+        passed,
+        failed,
+        accuracy: currentAccuracy,
+        avgLatencyMs: currentAvgLatency,
+        totalTokens,
+        estimatedCost: calculateCost(totalTokens, model),
+      },
+    });
+
+    console.log(`[test-runner] Progress: ${processed}/${totalCases} (${passed} passed, ${failed} failed)`);
+  }
+
+  // Mark completed
+  const accuracy = totalCases > 0 ? passed / totalCases : 0;
+  const avgLatencyMs = totalCases > 0 ? totalLatency / totalCases : 0;
+
+  await prisma.testRun.update({
+    where: { id: runId },
+    data: {
+      status: "COMPLETED",
+      completedAt: new Date(),
+      totalCases,
+      passed,
+      failed,
+      accuracy,
+      avgLatencyMs,
+      totalTokens,
+      estimatedCost: calculateCost(totalTokens, model),
+    },
+  });
+
+  console.log(`[test-runner] Run ${runId} complete: ${passed}/${totalCases} passed (${(accuracy * 100).toFixed(1)}%)`);
+  return runId;
 }
 
 export async function compareRuns(runId1: string, runId2: string) {

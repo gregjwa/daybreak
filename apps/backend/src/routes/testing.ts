@@ -22,6 +22,9 @@ import {
   initializeDefaultPrompt,
   buildDefaultSystemPromptForTests,
   exportRunForReview,
+  pauseTestRun,
+  resumeTestRun,
+  cancelTestRun,
 } from "../lib/test-runner";
 
 const testing = new Hono();
@@ -434,6 +437,45 @@ testing.get("/runs/:id", async (c) => {
   }
 
   return c.json(result);
+});
+
+// POST /api/testing/runs/:id/pause - Pause a running test
+testing.post("/runs/:id/pause", async (c) => {
+  const { id } = c.req.param();
+
+  try {
+    await pauseTestRun(id);
+    return c.json({ success: true, status: "PAUSED" });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Failed to pause" }, 400);
+  }
+});
+
+// POST /api/testing/runs/:id/resume - Resume a paused test
+testing.post("/runs/:id/resume", async (c) => {
+  const { id } = c.req.param();
+
+  try {
+    // Resume in background (don't await completion)
+    resumeTestRun(id).catch(err => {
+      console.error(`[testing] Error resuming run ${id}:`, err);
+    });
+    return c.json({ success: true, status: "RUNNING" });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Failed to resume" }, 400);
+  }
+});
+
+// POST /api/testing/runs/:id/cancel - Cancel a running or paused test
+testing.post("/runs/:id/cancel", async (c) => {
+  const { id } = c.req.param();
+
+  try {
+    await cancelTestRun(id);
+    return c.json({ success: true, status: "CANCELLED" });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Failed to cancel" }, 400);
+  }
 });
 
 // GET /api/testing/runs/:id/failures - Get only failed results
