@@ -60,80 +60,104 @@ interface MessageForAnalysis {
   sentAt: Date;
 }
 
-const PROMPT_VERSION = "v1-thread-analysis";
+const PROMPT_VERSION = "v2-dynamic-statuses";
+
+// Status definitions cache
+let statusDefinitionsCache: StatusDefinition[] | null = null;
+
+interface StatusDefinition {
+  slug: string;
+  name: string;
+  description: string | null;
+  order: number;
+  inboundSignals: string[];
+  outboundSignals: string[];
+  excludePatterns: string[];
+}
 
 /**
- * Build the system prompt for thread analysis
+ * Fetch status definitions from database (cached)
  */
-function buildSystemPrompt(): string {
+async function getStatusDefinitions(): Promise<StatusDefinition[]> {
+  if (!statusDefinitionsCache) {
+    statusDefinitionsCache = await prisma.supplierStatus.findMany({
+      where: { isSystem: true },
+      orderBy: { order: "asc" },
+      select: {
+        slug: true,
+        name: true,
+        description: true,
+        order: true,
+        inboundSignals: true,
+        outboundSignals: true,
+        excludePatterns: true,
+      },
+    });
+  }
+  return statusDefinitionsCache;
+}
+
+/**
+ * Clear status definitions cache (call when statuses are updated)
+ */
+export function clearStatusDefinitionsCache() {
+  statusDefinitionsCache = null;
+}
+
+/**
+ * Build the system prompt dynamically from database status definitions
+ */
+async function buildSystemPrompt(): Promise<string> {
+  const statuses = await getStatusDefinitions();
+  
+  // Build status definitions section
+  const statusDefs = statuses.map(s => {
+    let def = `- ${s.slug}: ${s.description || s.name}`;
+    if (s.excludePatterns && s.excludePatterns.length > 0) {
+      def += `\n    NOT this status if: ${s.excludePatterns.join(", ")}`;
+    }
+    return def;
+  }).join("\n");
+
   return `You are analyzing an email thread between an event planner and a vendor/supplier.
 
 Your task is to extract:
 
 1. PROJECT CONTEXT - Look for mentions of:
-   - Event name or description (e.g., "Johnson Wedding", "2025 Corporate Summit")
+   - Event name or description
    - Event type (wedding, corporate, party, conference, etc.)
-   - Event date (any dates mentioned in context of the event)
-   - Venue (location names)
-   - Guest count (number of attendees)
+   - Event date
+   - Venue
+   - Guest count
    - Budget discussions
 
-2. STATUS PROGRESSION - Identify what stage the vendor relationship is at:
-   Possible statuses (in order of normal progression):
-   - needed: Vendor needed but not contacted yet
-   - shortlisted: Vendor identified as potential option
-   - rfq-sent: Request for quote sent to vendor
-   - quote-received: Vendor provided pricing/quote
-   - negotiating: Discussing terms, pricing, details
-   - confirmed: Vendor confirmed for the event
-   - contracted: Contract signed
-   - deposit-paid: Initial payment made
-   - fulfilled: Service delivered (post-event)
-   - paid-in-full: Final payment complete
-   
-   OFF-RAMP STATUS (can happen at any point):
-   - cancelled: Vendor or planner has cancelled/withdrawn from the booking
+2. STATUS PROGRESSION - Identify what stage the vendor relationship is at.
 
-   For each status change you detect, identify:
+AVAILABLE STATUSES (from database):
+${statusDefs}
+
+For each status change you detect:
    - Which message triggered it (by index, 0-based)
    - What signals indicated the change
    - Confidence (0-1)
+   - Your reasoning
 
 3. SUPPLIER INFO:
    - Company/business name
    - Contact person name
-   - What service category they provide
-   - Any quote amounts mentioned (as numbers)
+   - Service category
+   - Quote amounts
 
-RULES:
-- Detect statuses when there is reasonable evidence in the messages
-- Look at the DIRECTION of messages (INBOUND = from vendor, OUTBOUND = from planner)
+DETECTION RULES:
+1. INBOUND = message FROM vendor. OUTBOUND = message FROM planner.
+2. Match the MEANING of the message to the status definition.
+3. Check the "NOT this status if" exclusions - if any match, skip that status.
+4. Focus on what is HAPPENING in the message, not promises for the future.
+5. If vendor says YES/AGREE/AVAILABLE = "confirmed" (even if quote promised later)
+6. If vendor provides ACTUAL $ amounts = "quote-received"
+7. Always include "reasoning" explaining your logic.
 
-STATUS MEANING GUIDE:
-- rfq-sent: Planner is asking about availability, pricing, or services
-- quote-received: Vendor has PROVIDED ACTUAL PRICING (contains $ amounts or specific rates)
-- confirmed: Vendor has AGREED to do the work (says "yes", "we can do it", "available", "confirmed")
-- contracted: Legal contract has been signed
-- deposit-paid: Money has changed hands (deposit or retainer)
-- fulfilled: Service was SUCCESSFULLY DELIVERED (post-event only)
-- paid-in-full: Final payment completed
-- cancelled: Either party has WITHDRAWN from the agreement
-
-IMPORTANT DISTINCTIONS:
-1. "confirmed" vs "quote-received":
-   - "Yes we can do it. Will send quote later" = CONFIRMED (they agreed to the work)
-   - "Here's our pricing: $500" = QUOTE-RECEIVED (actual pricing provided)
-   - A vendor confirming availability WITHOUT pricing = CONFIRMED, not quote-received
-
-2. "cancelled" vs "fulfilled":
-   - "Can no longer do it", "unfortunately", "backing out" = CANCELLED
-   - "Thank you for having us", "great event" (POST-EVENT) = FULFILLED
-
-3. Focus on the LATEST message for current status, use history for context.
-
-Always include a "reasoning" field explaining your status detection logic.
-
-Respond with ONLY valid JSON matching this schema:
+Respond with ONLY valid JSON:
 {
   "projectSignals": {
     "eventName": "string or null",
@@ -146,16 +170,16 @@ Respond with ONLY valid JSON matching this schema:
   "projectConfidence": 0.0-1.0,
   "statusProgression": [
     {
-      "statusSlug": "confirmed",
+      "statusSlug": "status-slug",
       "messageIndex": 0,
-      "signals": ["yes we can", "available"],
+      "signals": ["matched signal 1", "matched signal 2"],
       "confidence": 0.9,
-      "direction": "INBOUND",
-      "reasoning": "Vendor confirmed they can fulfill the request for the specified date"
+      "direction": "INBOUND or OUTBOUND",
+      "reasoning": "Why this status was detected"
     }
   ],
-  "currentStatus": "confirmed or null",
-  "reasoning": "Overall explanation of status detection logic",
+  "currentStatus": "status-slug or null",
+  "reasoning": "Overall explanation of status detection",
   "supplierSignals": {
     "companyName": "string or null",
     "contactName": "string or null",
@@ -210,7 +234,7 @@ async function callThreadAnalysisAI(
   }
 
   const model = process.env.THREAD_ANALYSIS_MODEL || "gpt-4o-mini";
-  const systemPrompt = buildSystemPrompt();
+  const systemPrompt = await buildSystemPrompt();
   const userMessage = buildUserMessage(messages);
 
   try {

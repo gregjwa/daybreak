@@ -6,9 +6,17 @@ import {
   ArrowsClockwise,
   Database,
   Terminal,
+  TestTube,
 } from "@phosphor-icons/react";
 
 const devNavItems = [
+  {
+    name: "Status Testing",
+    path: "/dev/testing",
+    icon: TestTube,
+    description: "Test status detection accuracy",
+    highlight: true,
+  },
   {
     name: "Experiments",
     path: "/dev/experiments",

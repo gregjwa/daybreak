@@ -135,8 +135,8 @@ function calculateCost(model: string, inputTokens: number, outputTokens: number)
   const pricing: Record<string, { input: number; output: number }> = {
     "gpt-4o-mini": { input: 0.15, output: 0.60 },
     "gpt-4o": { input: 2.50, output: 10.00 },
-    "gpt-5-mini": { input: 0.30, output: 1.20 }, // Estimated
-    "gpt-5": { input: 5.00, output: 15.00 }, // Estimated
+    "gpt-5-mini": { input: 0.25, output: 2.00 }, // Estimated
+    "gpt-5": { input: 1.25, output: 10.00 }, // Estimated
   };
 
   const price = pricing[model] || { input: 0.50, output: 2.00 };

@@ -13,9 +13,10 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "prisma generate && tsup src/index.ts --format esm --clean --dts",
+    "build": "prisma generate && prisma db push --skip-generate && tsup src/index.ts --format esm --clean --dts",
     "start": "node dist/index.js",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:push": "prisma db push"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

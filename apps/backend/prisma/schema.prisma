@@ -365,7 +365,7 @@ model SupplierStatus {
   id          String   @id @default(cuid())
   slug        String   @unique  // "rfq-sent", "quote-received"
   name        String            // "RFQ Sent", "Quote Received"
-  description String?
+  description String?           // Clear definition of what this status means
   order       Int               // Pipeline ordering (1-10)
   color       String?           // For UI badges, e.g. "#10B981"
   isSystem    Boolean  @default(true)  // Predefined vs custom
@@ -374,6 +374,7 @@ model SupplierStatus {
   inboundSignals   String[]  // Signals in messages FROM supplier
   outboundSignals  String[]  // Signals in messages TO supplier
   threadPatterns   String[]  // Thread-level patterns, e.g. "first outbound asking"
+  excludePatterns  String[]  // Patterns that EXCLUDE this status (e.g., "will send quote" excludes quote-received)
   
   userConfigs      UserStatusConfig[]
 
@@ -601,4 +602,166 @@ model DomainInfo {
   updatedAt     DateTime @updatedAt
 
   @@map("domain_info")
+}
+
+// --- Status Detection Testing Models ---
+
+// Versioned email test sets
+model TestEmailSet {
+  id              String   @id @default(cuid())
+  name            String   @unique  // "v1-initial", "v2-more-edge-cases"
+  description     String?
+  
+  // Stats
+  totalCases      Int      @default(0)
+  inboundCount    Int      @default(0)
+  outboundCount   Int      @default(0)
+  
+  cases           TestCase[]
+  runs            TestRun[]
+  
+  createdAt       DateTime @default(now())
+
+  @@map("test_email_sets")
+}
+
+// Supplier personas for test generation
+model TestPersona {
+  id              String   @id @default(cuid())
+  name            String           // "Maria's Florals"
+  companyName     String           // "Maria's Florals LLC"
+  contactName     String           // "Maria Rodriguez"
+  email           String           // "maria@mariasflorals.com"
+  category        String           // "florist"
+  
+  // Personality traits
+  communicationStyle String        // "formal", "casual", "terse", "verbose"
+  reliability     String           // "reliable", "flaky", "aggressive"
+  pricePoint      String           // "budget", "mid-range", "premium"
+  
+  testCases       TestCase[]
+  createdAt       DateTime @default(now())
+
+  @@map("test_personas")
+}
+
+// Individual test cases (emails)
+model TestCase {
+  id              String   @id @default(cuid())
+  
+  // Relationships
+  emailSetId      String
+  emailSet        TestEmailSet @relation(fields: [emailSetId], references: [id], onDelete: Cascade)
+  personaId       String
+  persona         TestPersona @relation(fields: [personaId], references: [id])
+  
+  // Email content
+  subject         String
+  body            String   @db.Text
+  direction       String           // "INBOUND" | "OUTBOUND"
+  
+  // Thread context
+  threadContext   Json?            // Previous messages array
+  hasThreadContext Boolean @default(false)
+  
+  // Ground truth
+  expectedStatus  String
+  scenario        String           // "normal", "tricky", "followup", "edge"
+  difficulty      Int              // 1-4
+  
+  // Metadata
+  tags            String[]
+  generationNotes String?  @db.Text // Why this email should be this status
+  
+  results         TestResult[]
+  createdAt       DateTime @default(now())
+
+  @@map("test_cases")
+}
+
+// Versioned prompts for A/B testing
+model TestPrompt {
+  id              String   @id @default(cuid())
+  version         String   @unique  // "v1", "v2-dynamic", "v3-explicit"
+  name            String           // "Dynamic Status Definitions"
+  description     String?  @db.Text
+  
+  // The actual prompt content
+  systemPrompt    String   @db.Text
+  
+  // Settings
+  model           String   @default("gpt-4o-mini")
+  maxTokens       Int      @default(1500)
+  
+  isActive        Boolean  @default(true)
+  runs            TestRun[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("test_prompts")
+}
+
+// A test run execution
+model TestRun {
+  id              String   @id @default(cuid())
+  
+  // What we tested
+  emailSetId      String
+  emailSet        TestEmailSet @relation(fields: [emailSetId], references: [id])
+  promptId        String
+  prompt          TestPrompt @relation(fields: [promptId], references: [id])
+  
+  // Snapshot of settings at run time
+  promptVersion   String
+  model           String
+  promptSnapshot  String   @db.Text  // Full prompt used (for reproducibility)
+  
+  // Aggregate stats
+  totalCases      Int      @default(0)
+  passed          Int      @default(0)
+  failed          Int      @default(0)
+  accuracy        Float    @default(0)
+  
+  // Performance
+  avgLatencyMs    Float    @default(0)
+  totalTokens     Int      @default(0)
+  estimatedCost   Float    @default(0)
+  
+  // Status
+  status          String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
+  startedAt       DateTime?
+  completedAt     DateTime?
+  errorMessage    String?
+  
+  results         TestResult[]
+  createdAt       DateTime @default(now())
+
+  @@map("test_runs")
+}
+
+// Individual test result
+model TestResult {
+  id              String   @id @default(cuid())
+  
+  runId           String
+  run             TestRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  caseId          String
+  case            TestCase @relation(fields: [caseId], references: [id])
+  
+  // Result
+  passed          Boolean
+  expectedStatus  String
+  detectedStatus  String?
+  confidence      Float?
+  reasoning       String?  @db.Text
+  
+  // Debug info
+  rawResponse     String?  @db.Text
+  latencyMs       Int      @default(0)
+  tokens          Int?
+  
+  createdAt       DateTime @default(now())
+
+  @@map("test_results")
 }

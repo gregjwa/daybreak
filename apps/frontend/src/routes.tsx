@@ -31,6 +31,17 @@ const EmailMatchingPage = lazy(() => import("@/pages/dev/EmailMatchingPage"));
 const StatusUpdatesPage = lazy(() => import("@/pages/dev/StatusUpdatesPage"));
 const DataInspectorPage = lazy(() => import("@/pages/dev/DataInspectorPage"));
 
+// Lazy load testing pages
+const TestingLayout = lazy(() => import("@/pages/dev/testing/TestingLayout"));
+const TestingOverview = lazy(() => import("@/pages/dev/testing/TestingOverview"));
+const PersonasPage = lazy(() => import("@/pages/dev/testing/PersonasPage"));
+const EmailSetsPage = lazy(() => import("@/pages/dev/testing/EmailSetsPage"));
+const EmailSetDetail = lazy(() => import("@/pages/dev/testing/EmailSetDetail"));
+const PromptsPage = lazy(() => import("@/pages/dev/testing/PromptsPage"));
+const RunnerPage = lazy(() => import("@/pages/dev/testing/RunnerPage"));
+const RunsPage = lazy(() => import("@/pages/dev/testing/RunsPage"));
+const RunDetail = lazy(() => import("@/pages/dev/testing/RunDetail"));
+
 // Loading fallback
 const PageLoader = () => (
   <div className="flex h-full items-center justify-center">
@@ -195,6 +206,80 @@ export const router = createBrowserRouter([
             <DataInspectorPage />
           </Suspense>
         ),
+      },
+      {
+        path: "testing",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <TestingLayout />
+          </Suspense>
+        ),
+        children: [
+          {
+            path: "",
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <TestingOverview />
+              </Suspense>
+            ),
+          },
+          {
+            path: "personas",
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <PersonasPage />
+              </Suspense>
+            ),
+          },
+          {
+            path: "email-sets",
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <EmailSetsPage />
+              </Suspense>
+            ),
+          },
+          {
+            path: "email-sets/:id",
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <EmailSetDetail />
+              </Suspense>
+            ),
+          },
+          {
+            path: "prompts",
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <PromptsPage />
+              </Suspense>
+            ),
+          },
+          {
+            path: "run",
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <RunnerPage />
+              </Suspense>
+            ),
+          },
+          {
+            path: "runs",
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <RunsPage />
+              </Suspense>
+            ),
+          },
+          {
+            path: "runs/:id",
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <RunDetail />
+              </Suspense>
+            ),
+          },
+        ],
       },
     ],
   },

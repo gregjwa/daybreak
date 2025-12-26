@@ -421,8 +421,16 @@ export async function processGmailThread(
       newMessages,
       existingMessages,
     };
-  } catch (error) {
-    console.error(`[thread-processor] Error processing thread ${gmailThreadId}:`, error);
+  } catch (error: any) {
+    // Handle specific error cases
+    if (error?.code === 404 || error?.status === 404) {
+      console.log(`[thread-processor] Thread ${gmailThreadId} not found (deleted or unavailable), skipping`);
+      return null;
+    }
+    
+    // Log a cleaner error message
+    const errorMessage = error?.message || error?.errors?.[0]?.message || "Unknown error";
+    console.error(`[thread-processor] Error processing thread ${gmailThreadId}: ${errorMessage}`);
     return null;
   }
 }

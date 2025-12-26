@@ -22,6 +22,7 @@ import { enrichmentRouter } from "./routes/enrichment";
 import proposalsRouter from "./routes/proposals";
 import statusesRouter from "./routes/statuses";
 import importRouter from "./routes/import";
+import testingRouter from "./routes/testing";
 
 function emailDebugEnabled() {
   return (
@@ -61,6 +62,7 @@ const app = new Hono()
   .route("/api/proposals", proposalsRouter)
   .route("/api/statuses", statusesRouter)
   .route("/api/import", importRouter)
+  .route("/api/testing", testingRouter)
 
   // Gmail Webhooks (No Auth Middleware needed, but keeping simple structure)
   // Note: Hono middleware runs on all routes by default if specific path not excluded?

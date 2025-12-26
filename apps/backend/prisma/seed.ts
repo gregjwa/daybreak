@@ -2,119 +2,129 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-// Supplier status pipeline
+// Supplier status pipeline with comprehensive definitions
+// These definitions are used to dynamically generate AI prompts
 const SUPPLIER_STATUSES = [
   {
     slug: "needed",
     name: "Needed",
-    description: "Vendor is needed for this category but not yet contacted",
+    description: "Vendor is needed for this category but not yet contacted. No communication has occurred.",
     order: 1,
-    color: "#6B7280", // gray-500
+    color: "#6B7280",
     inboundSignals: [],
     outboundSignals: [],
     threadPatterns: [],
+    excludePatterns: [],
   },
   {
     slug: "shortlisted",
     name: "Shortlisted",
-    description: "Vendor has been identified as a potential option",
+    description: "Vendor has been identified as a potential option but not yet formally contacted.",
     order: 2,
-    color: "#8B5CF6", // violet-500
+    color: "#8B5CF6",
     inboundSignals: [],
     outboundSignals: [],
     threadPatterns: [],
+    excludePatterns: [],
   },
   {
     slug: "rfq-sent",
     name: "RFQ Sent",
-    description: "Request for quote has been sent to the vendor",
+    description: "Planner has sent an inquiry asking about availability, pricing, or services. Awaiting vendor response.",
     order: 3,
-    color: "#3B82F6", // blue-500
+    color: "#3B82F6",
     inboundSignals: [],
-    outboundSignals: ["quote", "pricing", "proposal", "rates", "availability", "packages", "services", "what do you charge"],
-    threadPatterns: ["first outbound asking about services or pricing"],
+    outboundSignals: ["quote", "pricing", "proposal", "rates", "availability", "packages", "services", "what do you charge", "are you available"],
+    threadPatterns: ["outbound message asking about services or pricing"],
+    excludePatterns: [],
   },
   {
     slug: "quote-received",
     name: "Quote Received",
-    description: "Vendor has provided a quote or pricing information",
+    description: "Vendor has PROVIDED actual pricing numbers ($ amounts) or attached a quote document. The quote content is IN this message.",
     order: 4,
-    color: "#06B6D4", // cyan-500
-    // More specific signals - avoid matching "will send quote" which is just a promise
-    inboundSignals: ["$", "per hour", "per day", "rate is", "cost is", "price is", "total is", "estimate is", "proposal attached", "here's what we charge", "our pricing", "quote attached", "pricing below", "quote is"],
+    color: "#06B6D4",
+    inboundSignals: ["$", "per hour", "per day", "rate is", "cost is", "price is", "total is", "estimate is", "proposal attached", "here's what we charge", "our pricing", "quote attached", "pricing below"],
     outboundSignals: [],
-    threadPatterns: ["first inbound with pricing after outbound inquiry"],
+    threadPatterns: ["inbound message containing pricing information"],
+    excludePatterns: ["will send quote", "quote to follow", "send you pricing", "send quote later", "pricing soon"],
   },
   {
     slug: "negotiating",
     name: "Negotiating",
-    description: "Actively negotiating terms, pricing, or details",
+    description: "Active back-and-forth discussion about terms, pricing adjustments, or deal specifics.",
     order: 5,
-    color: "#F59E0B", // amber-500
-    inboundSignals: ["counter", "discount", "best price", "we can do", "final offer", "adjusted"],
+    color: "#F59E0B",
+    inboundSignals: ["counter", "discount", "best price", "we can do", "final offer", "adjusted", "special rate"],
     outboundSignals: ["budget is", "can you do", "lower", "negotiate", "flexibility", "discount", "better rate"],
     threadPatterns: ["back-and-forth about pricing or terms"],
+    excludePatterns: [],
   },
   {
     slug: "confirmed",
     name: "Confirmed",
-    description: "Vendor is confirmed for the event",
+    description: "Vendor has AGREED to do the work. They said yes, confirmed availability, or committed to the event. This does NOT require pricing to be finalized.",
     order: 6,
-    color: "#10B981", // emerald-500
-    // Signals indicating vendor is agreeing to do the work
-    inboundSignals: ["confirm", "booked", "reserved", "looking forward", "see you on", "you're all set", "yes we can", "we can do", "we can fulfil", "we can fulfill", "available on", "we're available", "count us in", "happy to help", "we'd be delighted"],
+    color: "#10B981",
+    inboundSignals: ["yes we can", "we can do", "we can fulfil", "we can fulfill", "we're available", "available on", "confirm", "booked", "reserved", "looking forward", "see you on", "you're all set", "count us in", "happy to help", "we'd be delighted", "we'll be there"],
     outboundSignals: ["confirm", "proceed", "go ahead", "let's do it", "book", "reserve", "we'd like to move forward"],
-    threadPatterns: ["agreement reached on terms"],
-  },
-  {
-    slug: "cancelled",
-    name: "Cancelled",
-    description: "Vendor booking has been cancelled",
-    order: 11, // After the main flow - it's an off-ramp
-    color: "#EF4444", // red-500
-    inboundSignals: ["can no longer", "unable to", "unfortunately", "have to cancel", "backing out", "cannot accommodate", "regret to inform", "apologies", "sorry", "decline", "withdraw"],
-    outboundSignals: ["have to cancel", "no longer need", "going with another", "decided against", "cancelling", "won't be proceeding"],
-    threadPatterns: ["either party backing out of agreement"],
+    threadPatterns: ["vendor agreement to provide services"],
+    excludePatterns: ["can no longer", "unable to", "unfortunately"],
   },
   {
     slug: "contracted",
     name: "Contracted",
-    description: "Contract has been signed",
+    description: "A formal contract or agreement document has been signed by both parties.",
     order: 7,
-    color: "#059669", // emerald-600
-    inboundSignals: ["contract", "agreement attached", "please sign", "docusign", "signed copy", "countersigned"],
+    color: "#059669",
+    inboundSignals: ["contract signed", "agreement attached", "please sign", "docusign", "signed copy", "countersigned"],
     outboundSignals: ["signed", "contract attached", "returning the signed", "executed"],
     threadPatterns: ["contract document exchanged"],
+    excludePatterns: [],
   },
   {
     slug: "deposit-paid",
     name: "Deposit Paid",
-    description: "Initial deposit or retainer has been paid",
+    description: "Initial deposit, retainer, or booking fee has been paid.",
     order: 8,
-    color: "#7C3AED", // violet-600
+    color: "#7C3AED",
     inboundSignals: ["deposit received", "payment received", "thank you for your payment", "retainer received"],
     outboundSignals: ["deposit sent", "paid deposit", "payment sent", "transferred", "wired"],
     threadPatterns: ["payment confirmation"],
+    excludePatterns: [],
   },
   {
     slug: "fulfilled",
     name: "Fulfilled",
-    description: "Vendor has delivered their services",
+    description: "Vendor has DELIVERED their services. The event has HAPPENED and the work is complete. Only applies POST-EVENT.",
     order: 9,
-    color: "#14B8A6", // teal-500
-    inboundSignals: ["delivered", "completed", "thank you for having us", "hope you enjoyed", "great event"],
-    outboundSignals: ["thank you", "great job", "wonderful service", "appreciate"],
+    color: "#14B8A6",
+    inboundSignals: ["delivered", "completed", "thank you for having us", "hope you enjoyed", "great event", "pleasure working with you"],
+    outboundSignals: ["thank you for the service", "great job", "wonderful service", "appreciate your work"],
     threadPatterns: ["post-event communication"],
+    excludePatterns: ["can no longer fulfill", "unable to fulfill"],
   },
   {
     slug: "paid-in-full",
     name: "Paid in Full",
-    description: "Final payment has been made",
+    description: "Final payment has been made, all financial obligations complete.",
     order: 10,
-    color: "#22C55E", // green-500
+    color: "#22C55E",
     inboundSignals: ["final payment received", "paid in full", "balance cleared", "all settled"],
     outboundSignals: ["final payment", "remaining balance", "full payment sent"],
     threadPatterns: ["final payment confirmation"],
+    excludePatterns: [],
+  },
+  {
+    slug: "cancelled",
+    name: "Cancelled",
+    description: "Either party has WITHDRAWN from the agreement. The booking is no longer happening.",
+    order: 11,
+    color: "#EF4444",
+    inboundSignals: ["can no longer", "unable to", "unfortunately we", "have to cancel", "backing out", "cannot accommodate", "regret to inform", "apologies but", "sorry but we can't", "must decline", "withdraw"],
+    outboundSignals: ["have to cancel", "no longer need", "going with another", "decided against", "cancelling", "won't be proceeding"],
+    threadPatterns: ["either party backing out of agreement"],
+    excludePatterns: [],
   },
 ];
 
@@ -194,6 +204,7 @@ async function main() {
         inboundSignals: status.inboundSignals,
         outboundSignals: status.outboundSignals,
         threadPatterns: status.threadPatterns,
+        excludePatterns: status.excludePatterns || [],
         isSystem: true,
       },
       create: {
@@ -205,6 +216,7 @@ async function main() {
         inboundSignals: status.inboundSignals,
         outboundSignals: status.outboundSignals,
         threadPatterns: status.threadPatterns,
+        excludePatterns: status.excludePatterns || [],
         isSystem: true,
       },
     });
