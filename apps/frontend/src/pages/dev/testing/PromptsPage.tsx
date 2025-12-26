@@ -21,6 +21,13 @@ import {
   DialogTitle,
 } from "@/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -35,11 +42,18 @@ const MODELS = [
   { value: "gpt-5-mini", label: "GPT-5 Mini (Recommended)" },
   { value: "gpt-5", label: "GPT-5" },
   { value: "gpt-5-nano", label: "GPT-5 Nano" },
-  { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-  { value: "gpt-4o", label: "GPT-4o" },
-  { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
+  { value: "gpt-5-pro", label: "GPT-5 Pro" },
+  { value: "gpt-5.1", label: "GPT-5.1" },
+  { value: "gpt-5.2", label: "GPT-5.2" },
+  { value: "gpt-5.2-pro", label: "GPT-5.2 Pro" },
   { value: "gpt-4.1", label: "GPT-4.1" },
+  { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
+  { value: "gpt-4.1-nano", label: "GPT-4.1 Nano" },
+  { value: "gpt-4o", label: "GPT-4o" },
+  { value: "gpt-4o-mini", label: "GPT-4o Mini" },
   { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
+  { value: "gpt-4", label: "GPT-4" },
+  { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
 ];
 
 export default function PromptsPage() {
@@ -388,21 +402,18 @@ function PromptEditorDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="model">Model</Label>
-              <Input
-                id="model"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="e.g. gpt-5-mini"
-                list="prompt-model-options"
-              />
-              <datalist id="prompt-model-options">
-                {MODELS.map((m) => (
-                  <option key={m.value} value={m.value} />
-                ))}
-              </datalist>
-              <p className="text-xs text-muted-foreground">
-                Type any model name. This field is not restricted to a preset list.
-              </p>
+              <Select value={model} onValueChange={setModel}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODELS.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="maxTokens">Max Tokens</Label>

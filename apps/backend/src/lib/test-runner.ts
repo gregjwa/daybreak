@@ -16,6 +16,74 @@ const AITestResponseSchema = z.object({
   reasoning: z.string(),
 });
 
+// Rate limits by model (TPM = tokens per minute, RPM = requests per minute)
+// Using 90% of limits for safety margin
+const MODEL_RATE_LIMITS: Record<string, { tpm: number; rpm: number }> = {
+  // GPT-5.x models
+  "gpt-5": { tpm: 450000, rpm: 450 },
+  "gpt-5-mini": { tpm: 450000, rpm: 450 },
+  "gpt-5-nano": { tpm: 180000, rpm: 450 },
+  "gpt-5-pro": { tpm: 27000, rpm: 450 },
+  "gpt-5.1": { tpm: 450000, rpm: 450 },
+  "gpt-5.2": { tpm: 450000, rpm: 450 },
+  "gpt-5.2-pro": { tpm: 450000, rpm: 450 },
+  // GPT-4.x models
+  "gpt-4.1": { tpm: 27000, rpm: 450 },
+  "gpt-4.1-mini": { tpm: 180000, rpm: 450 },
+  "gpt-4.1-nano": { tpm: 180000, rpm: 450 },
+  "gpt-4o": { tpm: 27000, rpm: 450 },
+  "gpt-4o-mini": { tpm: 180000, rpm: 450 },
+  "gpt-4-turbo": { tpm: 27000, rpm: 450 },
+  "gpt-4": { tpm: 9000, rpm: 450 },
+  // GPT-3.5 models
+  "gpt-3.5-turbo": { tpm: 180000, rpm: 450 },
+  // Default fallback (conservative)
+  "default": { tpm: 27000, rpm: 100 },
+};
+
+function getModelRateLimits(model: string): { tpm: number; rpm: number } {
+  // Try exact match first
+  if (MODEL_RATE_LIMITS[model]) {
+    return MODEL_RATE_LIMITS[model];
+  }
+  // Try prefix match (e.g., "gpt-5-mini-2025-08-07" -> "gpt-5-mini")
+  for (const [key, limits] of Object.entries(MODEL_RATE_LIMITS)) {
+    if (model.startsWith(key)) {
+      return limits;
+    }
+  }
+  return MODEL_RATE_LIMITS["default"];
+}
+
+// Estimate tokens for a request (rough calculation)
+function estimateRequestTokens(systemPrompt: string, userMessage: string, maxResponseTokens: number): number {
+  // Rough estimate: 1 token ≈ 4 characters for English text
+  const inputTokens = Math.ceil((systemPrompt.length + userMessage.length) / 4);
+  return inputTokens + maxResponseTokens;
+}
+
+// Calculate optimal concurrency based on rate limits
+function calculateConcurrency(
+  model: string,
+  estimatedTokensPerRequest: number,
+  batchSize: number
+): number {
+  const limits = getModelRateLimits(model);
+
+  // Calculate max concurrent based on TPM (tokens per minute)
+  // We want to complete batches within reasonable time, assume ~2s per request
+  // So in 60 seconds, we might make 30 batches
+  const maxConcurrentByTokens = Math.floor(limits.tpm / estimatedTokensPerRequest / 30);
+
+  // Calculate max concurrent based on RPM
+  // With 60 seconds and ~2s per request, we can do about 30 requests per concurrent slot
+  const maxConcurrentByRequests = Math.floor(limits.rpm / 30);
+
+  // Take the minimum and cap between 5 and 50
+  const optimal = Math.min(maxConcurrentByTokens, maxConcurrentByRequests, 50);
+  return Math.max(5, optimal);
+}
+
 type AITestResponseType = z.infer<typeof AITestResponseSchema>;
 
 // JSON Schema for OpenAI structured outputs
@@ -322,9 +390,12 @@ export async function runTestSuite(params: {
   let totalTokens = 0;
   let processed = 0;
 
-  // Process in parallel batches for speed
-  // Concurrency of 15 balances speed with API rate limits
-  const CONCURRENCY = 10;
+  // Calculate dynamic concurrency based on model rate limits
+  // Estimate tokens: system prompt + avg user message (~500 chars) + max response tokens
+  const estimatedTokensPerRequest = estimateRequestTokens(prompt.systemPrompt, " ".repeat(500), maxTokens);
+  const CONCURRENCY = calculateConcurrency(model, estimatedTokensPerRequest, testCases.length);
+  const limits = getModelRateLimits(model);
+  console.log(`[test-runner] Model: ${model}, Est. tokens/req: ${estimatedTokensPerRequest}, Concurrency: ${CONCURRENCY} (TPM: ${limits.tpm}, RPM: ${limits.rpm})`);
 
   for (let i = 0; i < testCases.length; i += CONCURRENCY) {
     // Check if run has been paused or cancelled
@@ -894,7 +965,12 @@ export async function resumeTestRun(runId: string): Promise<string> {
   const maxTokens = run.prompt?.maxTokens || 1500;
   const systemPrompt = run.promptSnapshot;
 
-  const CONCURRENCY = 15;
+  // Calculate dynamic concurrency based on model rate limits
+  const estimatedTokensPerRequest = estimateRequestTokens(systemPrompt, " ".repeat(500), maxTokens);
+  const CONCURRENCY = calculateConcurrency(model, estimatedTokensPerRequest, remainingCases.length);
+  const limits = getModelRateLimits(model);
+  console.log(`[test-runner] Resume - Model: ${model}, Est. tokens/req: ${estimatedTokensPerRequest}, Concurrency: ${CONCURRENCY} (TPM: ${limits.tpm}, RPM: ${limits.rpm})`);
+
   const totalCases = processed + remainingCases.length;
 
   for (let i = 0; i < remainingCases.length; i += CONCURRENCY) {
