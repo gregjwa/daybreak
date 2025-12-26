@@ -566,6 +566,21 @@ export async function exportRunForReview(runId: string): Promise<string> {
 
   const failures = run.results.filter(r => !r.passed);
   const successes = run.results.filter(r => r.passed);
+  const nullResponses = run.results.filter(r => r.detectedStatus === null);
+
+  // Categorize null responses
+  // API errors: rawResponse indicates an error, or no confidence (parsing failed)
+  const apiErrors = nullResponses.filter(r =>
+    r.rawResponse?.startsWith("Error:") ||
+    r.rawResponse?.startsWith("API Error:") ||
+    r.rawResponse === "Empty response from API" ||
+    r.rawResponse === "OPENAI_API_KEY not set" ||
+    r.confidence === null
+  );
+  // Intentional nulls: AI returned valid JSON with currentStatus: null and reasoning
+  const intentionalNulls = nullResponses.filter(r =>
+    r.confidence !== null && r.reasoning
+  );
 
   // Get 10% random sample of successes
   const sampleSize = Math.ceil(successes.length * 0.1);
@@ -594,6 +609,7 @@ export async function exportRunForReview(runId: string): Promise<string> {
   lines.push(`- **Total Cases:** ${run.totalCases}`);
   lines.push(`- **Passed:** ${run.passed} (${((run.passed / run.totalCases) * 100).toFixed(1)}%)`);
   lines.push(`- **Failed:** ${run.failed} (${((run.failed / run.totalCases) * 100).toFixed(1)}%)`);
+  lines.push(`- **Null Responses:** ${nullResponses.length} (${apiErrors.length} API errors, ${intentionalNulls.length} AI returned null)`);
   lines.push(``);
 
   // Format a single result
@@ -658,7 +674,32 @@ export async function exportRunForReview(runId: string): Promise<string> {
     });
   }
 
-  // Section 2: Low Confidence Successes
+  // Section 2: Null Responses (if any)
+  if (nullResponses.length > 0) {
+    lines.push(`## NULL RESPONSES (${nullResponses.length} total)`);
+    lines.push(``);
+    lines.push(`**Breakdown:** ${apiErrors.length} API errors, ${intentionalNulls.length} AI returned null intentionally`);
+    lines.push(``);
+
+    if (apiErrors.length > 0) {
+      lines.push(`### API Errors (${apiErrors.length})`);
+      lines.push(``);
+      apiErrors.forEach((r, i) => {
+        lines.push(formatResult(r, i, "API Error"));
+      });
+    }
+
+    if (intentionalNulls.length > 0) {
+      lines.push(`### AI Returned Null (${intentionalNulls.length})`);
+      lines.push(`These cases may indicate prompt confusion or edge cases the AI couldn't classify.`);
+      lines.push(``);
+      intentionalNulls.forEach((r, i) => {
+        lines.push(formatResult(r, i, "Intentional Null"));
+      });
+    }
+  }
+
+  // Section 3: Low Confidence Successes
   lines.push(`## LOW CONFIDENCE SUCCESSES (${lowConfidenceSuccesses.length} lowest)`);
   lines.push(``);
   if (lowConfidenceSuccesses.length === 0) {
@@ -670,7 +711,7 @@ export async function exportRunForReview(runId: string): Promise<string> {
     });
   }
 
-  // Section 3: Random Sample of Successes
+  // Section 4: Random Sample of Successes
   lines.push(`## RANDOM SUCCESS SAMPLE (${randomSample.length} of ${successes.length}, ~10%)`);
   lines.push(``);
   if (randomSample.length === 0) {

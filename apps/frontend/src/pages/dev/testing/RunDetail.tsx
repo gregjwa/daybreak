@@ -62,9 +62,37 @@ export default function RunDetail() {
   const resumeMutation = useResumeRun();
   const cancelMutation = useCancelRun();
 
-  const [filter, setFilter] = useState<"all" | "passed" | "failed">("all");
+  const [filter, setFilter] = useState<"all" | "passed" | "failed" | "null">("all");
   const [selectedResult, setSelectedResult] = useState<TestResult | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
+
+  // Calculate null response stats
+  const nullStats = useMemo(() => {
+    if (!data?.run.results) return { count: 0, apiErrors: 0, intentionalNulls: 0 };
+
+    const nullResults = data.run.results.filter(r => r.detectedStatus === null);
+
+    // API errors: rawResponse indicates an error (no valid JSON returned)
+    const apiErrors = nullResults.filter(r =>
+      r.rawResponse?.startsWith("Error:") ||
+      r.rawResponse?.startsWith("API Error:") ||
+      r.rawResponse === "Empty response from API" ||
+      r.rawResponse === "OPENAI_API_KEY not set" ||
+      r.confidence === null // No confidence means parsing failed
+    );
+
+    // Intentional nulls: AI returned valid JSON with currentStatus: null
+    // These should have reasoning explaining why
+    const intentionalNulls = nullResults.filter(r =>
+      r.confidence !== null && r.reasoning
+    );
+
+    return {
+      count: nullResults.length,
+      apiErrors: apiErrors.length,
+      intentionalNulls: intentionalNulls.length,
+    };
+  }, [data?.run.results]);
 
   // Polling for running tests - refetch every 3 seconds while running
   const isRunning = data?.run.status === "RUNNING";
@@ -84,6 +112,8 @@ export default function RunDetail() {
         return data.run.results.filter(r => r.passed);
       case "failed":
         return data.run.results.filter(r => !r.passed);
+      case "null":
+        return data.run.results.filter(r => r.detectedStatus === null);
       default:
         return data.run.results;
     }
@@ -251,7 +281,7 @@ export default function RunDetail() {
       )}
 
       {/* Overview Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="text-center">
@@ -275,6 +305,19 @@ export default function RunDetail() {
             <div className="text-center">
               <p className="text-4xl font-bold text-red-600">{run.failed}</p>
               <p className="text-sm text-muted-foreground mt-1">Failed</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className={nullStats.count > 0 ? "border-yellow-500" : ""}>
+          <CardContent className="pt-6">
+            <div className="text-center">
+              <p className="text-4xl font-bold text-yellow-600">{nullStats.count}</p>
+              <p className="text-sm text-muted-foreground mt-1">Null Responses</p>
+              {nullStats.count > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {nullStats.apiErrors} errors, {nullStats.intentionalNulls} intentional
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -368,13 +411,14 @@ export default function RunDetail() {
               <CardDescription>Individual test case results</CardDescription>
             </div>
             <Select value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-[180px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All ({run.totalCases})</SelectItem>
                 <SelectItem value="passed">Passed ({run.passed})</SelectItem>
                 <SelectItem value="failed">Failed ({run.failed})</SelectItem>
+                <SelectItem value="null">Null Responses ({nullStats.count})</SelectItem>
               </SelectContent>
             </Select>
           </div>
