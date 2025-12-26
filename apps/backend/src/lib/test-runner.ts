@@ -6,39 +6,29 @@
  */
 
 import { prisma } from "../db";
+import { buildStatusDetectionSystemPrompt } from "./status-detection-prompt";
 
-// Prompt for test execution (separate from production)
-const DEFAULT_SYSTEM_PROMPT = `You are analyzing an email thread between an event planner and a vendor/supplier.
+async function buildDefaultSystemPromptForTests(): Promise<string> {
+  const statuses = await prisma.supplierStatus.findMany({
+    where: { isSystem: true },
+    orderBy: { order: "asc" },
+    select: {
+      slug: true,
+      name: true,
+      description: true,
+      excludePatterns: true,
+    },
+  });
 
-Your task is to identify what stage the vendor relationship is at based on the email content.
-
-AVAILABLE STATUSES:
-- needed: Supplier/service identified as required for the project (not yet contacted)
-- shortlisted: Added to consideration list, may have been researched
-- rfq-sent: Request for quote/availability has been sent (outbound inquiry)
-- quote-received: Supplier responded with pricing or availability (actual $ amounts)
-- confirmed: Vendor has AGREED to do the work (verbal or written agreement)
-- negotiating: Active price or terms negotiation underway
-- contracted: Legal contract has been signed by both parties
-- deposit-paid: Initial payment or deposit has been made
-- fulfilled: Service has been delivered (post-event only)
-- paid-in-full: All payments complete, transaction closed
-- cancelled: One party has BACKED OUT of the agreement
-
-DETECTION RULES:
-1. INBOUND = message FROM vendor. OUTBOUND = message FROM planner.
-2. If vendor says YES/AGREE/AVAILABLE = "confirmed" (even if quote promised later)
-3. If vendor provides ACTUAL $ amounts = "quote-received" 
-4. "Can no longer fulfill" or backing out = "cancelled" (NOT fulfilled!)
-5. Post-event thank you = "fulfilled"
-6. Focus on the NEW/LATEST message to determine current status.
-
-Respond with ONLY valid JSON:
-{
-  "currentStatus": "status-slug or null",
-  "confidence": 0.0-1.0,
-  "reasoning": "Explain why you chose this status"
-}`;
+  return buildStatusDetectionSystemPrompt({
+    statuses: statuses.map((s) => ({
+      slug: s.slug,
+      name: s.name,
+      description: s.description,
+      excludePatterns: s.excludePatterns || [],
+    })),
+  });
+}
 
 interface TestContext {
   subject: string;
@@ -61,19 +51,46 @@ export async function initializeDefaultPrompt(): Promise<void> {
     where: { version: "v1-default" },
   });
 
+  const defaultModel =
+    process.env.THREAD_ANALYSIS_MODEL ||
+    process.env.TEST_DEFAULT_MODEL ||
+    "gpt-5-mini";
+
+  const defaultPrompt = await buildDefaultSystemPromptForTests();
+
   if (!existing) {
     await prisma.testPrompt.create({
       data: {
         version: "v1-default",
-        name: "Default Status Detection",
-        description: "The baseline prompt for status detection testing.",
-        systemPrompt: DEFAULT_SYSTEM_PROMPT,
-        model: "gpt-4o-mini",
-        maxTokens: 500,
+        name: "Default Status Detection (Matches Ingestion)",
+        description:
+          "Default prompt for the test suite. Mirrors the production ingestion prompt (dynamic statuses from DB).",
+        systemPrompt: defaultPrompt,
+        model: defaultModel,
+        maxTokens: 1500,
         isActive: true,
       },
     });
-    console.log("[test-runner] Created default prompt v1");
+    console.log("[test-runner] Created default prompt v1-default (ingestion-aligned)");
+    return;
+  }
+
+  // If the existing default prompt is empty (or clearly broken), repair it automatically.
+  if (!existing.systemPrompt || existing.systemPrompt.trim().length === 0) {
+    await prisma.testPrompt.update({
+      where: { id: existing.id },
+      data: {
+        name: existing.name || "Default Status Detection (Matches Ingestion)",
+        description:
+          existing.description ||
+          "Default prompt for the test suite. Mirrors the production ingestion prompt (dynamic statuses from DB).",
+        systemPrompt: defaultPrompt,
+        model: existing.model || defaultModel,
+        maxTokens: existing.maxTokens || 1500,
+        isActive: true,
+      },
+    });
+    console.log("[test-runner] Repaired empty default prompt v1-default");
   }
 }
 
@@ -138,7 +155,8 @@ function buildTestUserMessage(testCase: TestContext): string {
 async function callTestAI(
   systemPrompt: string,
   testCase: TestContext,
-  model: string
+  model: string,
+  maxTokens: number
 ): Promise<{ response: AITestResponse | null; latencyMs: number; tokens: number; rawResponse: string }> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -161,7 +179,7 @@ async function callTestAI(
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
         ],
-        max_completion_tokens: 500,
+        max_completion_tokens: maxTokens,
       }),
     });
 
@@ -226,6 +244,7 @@ export async function runTestSuite(params: {
   }
 
   const model = modelOverride || prompt.model;
+  const maxTokens = prompt.maxTokens || 1500;
 
   // Create the test run
   const run = await prisma.testRun.create({
@@ -267,7 +286,8 @@ export async function runTestSuite(params: {
     const { response, latencyMs, tokens, rawResponse } = await callTestAI(
       prompt.systemPrompt,
       context,
-      model
+      model,
+      maxTokens
     );
 
     const detectedStatus = response?.currentStatus || null;

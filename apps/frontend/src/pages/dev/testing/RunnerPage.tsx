@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { useEmailSets, usePrompts, useStartRun } from "@/api/useTesting";
 import { Button } from "@/ui/button";
 import { Label } from "@/ui/label";
+import { Input } from "@/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/ui/alert";
 import {
@@ -21,9 +22,14 @@ import {
 import { Loader2, Play, AlertTriangle, DollarSign, Clock, Zap } from "lucide-react";
 
 const MODELS = [
+  { value: "gpt-5-mini", label: "GPT-5 Mini (Recommended)" , costPer1k: 0.0003 },
+  { value: "gpt-5", label: "GPT-5" , costPer1k: 0.003 },
+  { value: "gpt-5-nano", label: "GPT-5 Nano" , costPer1k: 0.0001 },
   { value: "gpt-4o-mini", label: "GPT-4o Mini", costPer1k: 0.0003 },
   { value: "gpt-4o", label: "GPT-4o", costPer1k: 0.005 },
   { value: "gpt-4-turbo", label: "GPT-4 Turbo", costPer1k: 0.01 },
+  { value: "gpt-4.1-mini", label: "GPT-4.1 Mini", costPer1k: 0.0006 },
+  { value: "gpt-4.1", label: "GPT-4.1", costPer1k: 0.006 },
 ];
 
 export default function RunnerPage() {
@@ -133,21 +139,20 @@ export default function RunnerPage() {
               {/* Model Override */}
               <div className="space-y-2">
                 <Label htmlFor="model">Model Override (Optional)</Label>
-                <Select value={modelOverride} onValueChange={setModelOverride}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={`Use prompt default (${selectedPrompt?.model || "gpt-4o-mini"})`} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Use prompt default</SelectItem>
-                    {MODELS.map(model => (
-                      <SelectItem key={model.value} value={model.value}>
-                        {model.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Input
+                  id="model"
+                  value={modelOverride}
+                  onChange={(e) => setModelOverride(e.target.value)}
+                  placeholder={`Leave blank to use prompt default (${selectedPrompt?.model || "gpt-5-mini"})`}
+                  list="test-model-options"
+                />
+                <datalist id="test-model-options">
+                  {MODELS.map((m) => (
+                    <option key={m.value} value={m.value} />
+                  ))}
+                </datalist>
                 <p className="text-xs text-muted-foreground">
-                  Override to test the same prompt with a different model
+                  Type any model name (you’re not limited to the list). Leave blank to use the prompt’s default model.
                 </p>
               </div>
             </CardContent>

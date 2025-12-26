@@ -285,43 +285,60 @@ export async function generateTestEmails(
 
   console.log(`[test-generator] Generating ${toGenerate.length} test emails (AI: ${useAI})`);
 
-  for (const scenario of toGenerate) {
-    try {
-      // Pick a random persona
-      const persona = personas[Math.floor(Math.random() * personas.length)];
-      
-      // Generate email content
-      const email = useAI 
-        ? await generateEmailWithAI(persona, scenario)
-        : generateEmailTemplate(persona, scenario);
+  // Process in parallel batches to speed up generation
+  // Concurrency of 15 is a good balance for OpenAI rate limits
+  const CONCURRENCY = 15;
 
-      await prisma.testCase.create({
-        data: {
-          emailSetId,
-          personaId: persona.id,
-          subject: email.subject,
-          body: email.body,
-          direction: scenario.direction,
-          threadContext: scenario.threadContext || null,
-          hasThreadContext: !!scenario.threadContext,
-          expectedStatus: scenario.status,
-          scenario: scenario.scenario,
-          difficulty: scenario.difficulty,
-          tags: scenario.tags,
-          generationNotes: email.notes,
-        },
-      });
+  // Pre-assign personas to scenarios
+  const tasks = toGenerate.map(scenario => ({
+    scenario,
+    persona: personas[Math.floor(Math.random() * personas.length)],
+  }));
 
-      generated++;
+  // Process in batches
+  for (let i = 0; i < tasks.length; i += CONCURRENCY) {
+    const batch = tasks.slice(i, i + CONCURRENCY);
 
-      // Update email set stats
-      if (generated % 50 === 0) {
-        console.log(`[test-generator] Progress: ${generated}/${toGenerate.length}`);
+    const results = await Promise.allSettled(
+      batch.map(async ({ scenario, persona }) => {
+        // Generate email content
+        const email = useAI
+          ? await generateEmailWithAI(persona, scenario)
+          : generateEmailTemplate(persona, scenario);
+
+        await prisma.testCase.create({
+          data: {
+            emailSetId,
+            personaId: persona.id,
+            subject: email.subject,
+            body: email.body,
+            direction: scenario.direction,
+            threadContext: scenario.threadContext || null,
+            hasThreadContext: !!scenario.threadContext,
+            expectedStatus: scenario.status,
+            scenario: scenario.scenario,
+            difficulty: scenario.difficulty,
+            tags: scenario.tags,
+            generationNotes: email.notes,
+          },
+        });
+
+        return true;
+      })
+    );
+
+    // Count successes and failures
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        generated++;
+      } else {
+        console.error(`[test-generator] Error generating email:`, result.reason);
+        errors++;
       }
-    } catch (error) {
-      console.error(`[test-generator] Error generating email:`, error);
-      errors++;
     }
+
+    // Progress update after each batch
+    console.log(`[test-generator] Progress: ${generated + errors}/${toGenerate.length} (${generated} success, ${errors} errors)`);
   }
 
   // Update email set totals

@@ -21,13 +21,6 @@ import {
   DialogTitle,
 } from "@/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -38,8 +31,13 @@ import {
 import { Loader2, Plus, Pencil, Copy } from "lucide-react";
 
 const MODELS = [
-  { value: "gpt-4o-mini", label: "GPT-4o Mini (Fast, Cheap)" },
-  { value: "gpt-4o", label: "GPT-4o (Best, Expensive)" },
+  { value: "gpt-5-mini", label: "GPT-5 Mini (Recommended)" },
+  { value: "gpt-5", label: "GPT-5" },
+  { value: "gpt-5-nano", label: "GPT-5 Nano" },
+  { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+  { value: "gpt-4o", label: "GPT-4o" },
+  { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
+  { value: "gpt-4.1", label: "GPT-4.1" },
   { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
 ];
 
@@ -188,7 +186,7 @@ function PromptEditorDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
-  const [model, setModel] = useState("gpt-4o-mini");
+  const [model, setModel] = useState("gpt-5-mini");
   const [maxTokens, setMaxTokens] = useState(500);
 
   // Initialize form when prompt changes
@@ -297,18 +295,21 @@ function PromptEditorDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="model">Model</Label>
-              <Select value={model} onValueChange={setModel}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MODELS.map(m => (
-                    <SelectItem key={m.value} value={m.value}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input
+                id="model"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="e.g. gpt-5-mini"
+                list="prompt-model-options"
+              />
+              <datalist id="prompt-model-options">
+                {MODELS.map((m) => (
+                  <option key={m.value} value={m.value} />
+                ))}
+              </datalist>
+              <p className="text-xs text-muted-foreground">
+                Type any model name. This field is not restricted to a preset list.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="maxTokens">Max Tokens</Label>
